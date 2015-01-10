@@ -1,0 +1,278 @@
+
+@import "./fonts/fontin/fontin.less";
+@import "./fonts/fontin_sans/fontin_sans.less";
+
+@import "../node_modules/material-ui/src/less/scaffolding.less";
+
+@import "material-variables.less";
+
+@import "../node_modules/material-ui/src/less/components.less";
+
+html {
+  height: 100% !important;
+}
+
+body {
+  height: 100%;
+  font-size: 18px;
+  line-height: 25px;
+}
+
+
+h1 {
+  color: red;
+}
+
+p {
+  font-size: 18px;
+  line-height: 25px;
+}
+
+@menupadding: 11px;
+@menuheight: 52px;
+
+@shinecolor: #9D8671;
+
+
+.v-center() {
+  &:before {
+    content: '';
+    display: inline-block;
+    height: 100%;
+    vertical-align: middle;
+    margin-right: -0.25em; /* Adjusts for spacing */
+  }
+}
+
+#heroforge {
+  min-height: 100%;
+  background: #643E1B url("./woodplanks.jpg") repeat;
+  //bg from: http://forum.unity3d.com/threads/free-handpainted-wood-planking-texture.128779/
+  .lh-box-shadow(inset 0px 0px 100px 20px rgba(24, 12, 1, 0.7));
+}
+
+.main-wrapper {
+  width: 100%;
+  padding-top: @menuheight;
+}
+
+.paper {
+  background: rgba(255, 238, 192, 0.90) url("./paper-over.png") repeat;
+  .inner {
+    .lh-box-shadow(inset 0 0 60px 0 rgba(108, 78, 9, 0.30));
+  }
+}
+
+#pf-menubar {
+  .clearfix();
+  
+  position: absolute;
+  height: @menuheight;
+  width: 100%;
+  text-align: center;
+  z-index: 1;
+  
+  .inner {
+    height: 100%;
+    .v-center();
+    .lh-box-shadow(inset 0 0 20px 0 rgba(108, 78, 9, 0.30));
+  }
+  
+  .menu-button {
+    .mui-raised-button-label {
+      padding: 0 8px;
+    }
+    button:before {
+      content: '';
+      position: absolute;
+      height: 160px;
+      width: 20px;
+      background: @shinecolor;
+      top: -40px;
+      left: -40px;
+      display: block;
+      // opacity: 0.6;
+      box-shadow: 0px 0px 30px 5px @shinecolor; 
+      transform: rotate(-40deg);
+      transition: all 0.5s ease;
+    }
+    button:hover:before {
+      top: -80px;
+      left: 120px;
+    }
+  }
+  
+  .left-group {
+    position: absolute;
+    top: @menupadding;
+    left: 8px;
+  }
+  .title {
+    font-family: @decorativeFontFamily;
+    display: inline-block;
+    vertical-align: middle;
+    font-weight: bold;
+    margin: 0 25%;
+    width: 50%;
+    font-size: 21px;
+    & > div {
+      line-height: @menuheight;
+    }
+    
+    &.has-sub {
+      & > div {
+        width: 100%;
+      }
+      .primary {
+        font-size: 20px;
+        height: 25px;
+        line-height: 25px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .subtitle {
+        font-size: 14px;
+        height: 16px;
+        line-height: 16px;
+        font-family: @contentFontFamily;
+        font-weight: bold;
+      }
+    }
+  }
+  .right-group {
+    position: absolute;
+    top: @menupadding;
+    right: 8px;
+  }
+  
+}
+
+.hf-mode {
+  width: 100%;
+  height: 100%;
+  max-width: 720px;
+  padding: 10px;
+  padding-top: 20px;
+  margin: 0 auto;
+}
+
+
+.hf-mode.page {
+  .paper {
+    .inner {
+      padding: 20px;
+    }
+  }
+}
+
+
+@avatar-size: 90px;
+
+.hf-mode.list {
+  text-align: center;
+  
+  .login-notice {
+    height: 100%;
+    text-align: center;
+    font-size: 20px;
+    font-style: italic;
+    .paper {
+      margin-top: 2*@menuheight;
+      -webkit-transform: perspective(200px) rotateX(1deg);
+         -moz-transform: perspective(200px) rotateX(1deg);
+           -o-transform: perspective(200px) rotateX(1deg);
+          -ms-transform: perspective(200px) rotateX(1deg);
+              transform: perspective(200px) rotateX(1deg);
+      display: inline-block;
+      vertical-align: middle;
+      .inner {
+        padding: 20px;
+      }
+    }
+  }
+  
+  ul {
+    display: inline-block;
+    list-style: none;
+    text-align: center;
+    .clearfix();
+    li {
+      position: relative;
+      display: inline-block;
+      margin: 10px;
+      margin-bottom: 15px;
+      width: 120px;
+      height: 120px;
+      cursor: pointer;
+      // transition: all 0.1s ease-out;
+      &:hover {
+        // transform: scale(1.04);
+        .avatar {
+          .lh-box-shadow(0px -2px 5px 3px rgba(255,247,219, 1));
+        }
+        .name {
+          .lh-box-shadow(0px 0px 8px 5px rgba(255,247,219, 1));
+        }
+        .mui-paper-container {
+          box-shadow: none;
+        }
+      }
+      .list-item {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        top: 0px;
+        left: 0px;
+        text-align: center;
+        
+        .avatar {
+          display: inline-block;
+          width: @avatar-size;
+          height: @avatar-size;
+          overflow: hidden;
+          background-color: #B8841D;
+          position: relative;
+          &:after {
+            position: absolute;
+            top: 0px;
+            left: 0px;
+            display: block;
+            content: "";
+            width: @avatar-size;
+            height: @avatar-size;
+            border-radius: 50%;
+            background-image: url("./paper-over.png");
+            .lh-box-shadow(inset -1px -2px 0px 0px rgba(24, 12, 1, 0.5));
+          }
+          img, svg {
+            width: @avatar-size;
+            height: @avatar-size;
+          }
+          svg {
+            path {
+              fill: #412603;
+            }
+          }
+        }
+        .name {
+          font-family: @decorativeFontFamily;
+          font-weight: bold;
+          width: 100%;
+          margin-top: -15px;
+          // transform: rotate(-2deg);
+          .inner {
+            padding: 10px;
+            padding-top: 15px;
+            font-size: 16px;
+            line-height: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            .lh-box-shadow(inset 0 0 20px 0 rgba(108, 78, 9, 0.30));
+          }
+        }
+      }
+    }
+  }
+}
