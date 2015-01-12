@@ -110,6 +110,11 @@ p {
     margin: 0 25%;
     width: 50%;
     font-size: 21px;
+    
+    img {
+      height: 38px;
+    }
+    
     & > div {
       line-height: @menuheight;
     }
@@ -281,6 +286,47 @@ p {
     }
   }
 }
+
+@media screen and (min-width: 1025px) {
+  @menuheight-big: 70px;
+  .main-wrapper {
+    padding-top: @menuheight-big;
+  }
+  #pf-menubar {
+    height: @menuheight-big;
+    .title {
+      font-size: 26px;
+      
+      &.has-sub {
+        .primary {
+          font-size: 26px;
+          height: 32px;
+          line-height: 32px;
+        }
+        .subtitle {
+          font-size: 18px;
+          height: 26px;
+          line-height: 26px;
+        }
+      }
+      img {
+        height: 54px;
+      }
+      & > div {
+        line-height: @menuheight-big;
+      }
+    }
+    .left-group {
+      top: 19px;
+      left: 15px;
+    }
+    .right-group {
+      top: 19px;
+      right: 15px;
+    }
+  }
+}
+  
 
 @media screen and (max-width: 580px) {
   .hf-mode.list {

@@ -5545,6 +5545,9 @@ p {
   width: 50%;
   font-size: 21px;
 }
+#pf-menubar .title img {
+  height: 38px;
+}
 #pf-menubar .title > div {
   line-height: 52px;
 }
@@ -5712,6 +5715,41 @@ p {
 .hf-mode.list ul li .list-item .info .details .level {
   font-weight: bold;
   float: left;
+}
+@media screen and (min-width: 1025px) {
+  .main-wrapper {
+    padding-top: 70px;
+  }
+  #pf-menubar {
+    height: 70px;
+  }
+  #pf-menubar .title {
+    font-size: 26px;
+  }
+  #pf-menubar .title.has-sub .primary {
+    font-size: 26px;
+    height: 32px;
+    line-height: 32px;
+  }
+  #pf-menubar .title.has-sub .subtitle {
+    font-size: 18px;
+    height: 26px;
+    line-height: 26px;
+  }
+  #pf-menubar .title img {
+    height: 54px;
+  }
+  #pf-menubar .title > div {
+    line-height: 70px;
+  }
+  #pf-menubar .left-group {
+    top: 19px;
+    left: 15px;
+  }
+  #pf-menubar .right-group {
+    top: 19px;
+    right: 15px;
+  }
 }
 @media screen and (max-width: 580px) {
   .hf-mode.list ul {
