@@ -44,7 +44,6 @@ p {
     top: -40px;
     left: -40px;
     display: block;
-    // opacity: 0.6;
     box-shadow: 0px 0px 30px 5px @shinecolor; 
     transform: rotate(-40deg);
     transition: all 0.5s ease;
@@ -93,23 +92,8 @@ p {
     .mui-raised-button-label {
       padding: 0 8px;
     }
-    button:before {
-      content: '';
-      position: absolute;
-      height: 160px;
-      width: 20px;
-      background: @shinecolor;
-      top: -40px;
-      left: -40px;
-      display: block;
-      // opacity: 0.6;
-      box-shadow: 0px 0px 30px 5px @shinecolor; 
-      transform: rotate(-40deg);
-      transition: all 0.5s ease;
-    }
-    button:hover:before {
-      top: -80px;
-      left: 120px;
+    button {
+      .shine();
     }
   }
   
@@ -168,7 +152,6 @@ p {
   margin: 0 auto;
 }
 
-
 .hf-mode.page {
   .paper {
     .inner {
@@ -176,7 +159,6 @@ p {
     }
   }
 }
-
 
 @avatar-size: 110px;
 
