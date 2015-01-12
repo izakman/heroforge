@@ -2051,7 +2051,7 @@ var HFMenuBarTitle = React.createClass({displayName: "HFMenuBarTitle",
     } else if (this.props.title === null) {
       return (
         React.createElement("div", {className: "title"}, 
-          React.createElement("img", {src: "images/pf-logo-title.png"})
+          React.createElement("img", {src: "images/hf-logo-title.png"})
         )
       );
     } else {
