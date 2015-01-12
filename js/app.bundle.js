@@ -1752,7 +1752,7 @@ var React = require('react'),
     CharacterActions = require('./actions/CharacterActions.js'),
     RouteActions = require('./actions/RouteActions.js'),
     
-    CharacterListItem = require('./components/CharacterListItem.jsx');
+    HFCharacterListItem = require('./components/HFCharacterListItem.jsx');
 
 
 var CharacterList = React.createClass({displayName: "CharacterList",
@@ -1787,7 +1787,7 @@ var CharacterList = React.createClass({displayName: "CharacterList",
             this.props.user.characters.map(function(character) {
               return (
                 React.createElement("li", {onClick: CharacterActions.loadCharacter.bind(null, character, 'editor')}, 
-                  React.createElement(CharacterListItem, {character: character})
+                  React.createElement(HFCharacterListItem, {character: character})
                 )
               );
             }.bind(this))
@@ -1799,7 +1799,7 @@ var CharacterList = React.createClass({displayName: "CharacterList",
 });
 
 module.exports = CharacterList;
-},{"./actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/CharacterListItem.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\CharacterListItem.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react-router":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterPlayer.jsx":[function(require,module,exports){
+},{"./actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFCharacterListItem.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFCharacterListItem.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react-router":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterPlayer.jsx":[function(require,module,exports){
 var React = require('react'),
     
     Navigation = require('react-router').Navigation,
@@ -1931,10 +1931,10 @@ var UserActions = Reflux.createActions([
 ]);
 
 module.exports = UserActions;
-},{"reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\AvatarImage.jsx":[function(require,module,exports){
+},{"reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFAvatarImage.jsx":[function(require,module,exports){
 var React = require('react');
 
-var AvatarImage = React.createClass({displayName: "AvatarImage",
+var HFAvatarImage = React.createClass({displayName: "HFAvatarImage",
 
   render: function() {
     return (
@@ -1956,25 +1956,31 @@ var AvatarImage = React.createClass({displayName: "AvatarImage",
 
 });
 
-module.exports = AvatarImage;
-},{"react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\CharacterListItem.jsx":[function(require,module,exports){
+module.exports = HFAvatarImage;
+},{"react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFCharacterListItem.jsx":[function(require,module,exports){
 var React = require('react'),
 
     mui = require('material-ui'),
     Paper = mui.Paper,
     
-    AvatarImage = require('./AvatarImage.jsx');
+    HFAvatarImage = require('./HFAvatarImage.jsx');
 
-var CharacterListItem = React.createClass({displayName: "CharacterListItem",
+var HFCharacterListItem = React.createClass({displayName: "HFCharacterListItem",
   
   render: function() {
     return (
       React.createElement("div", {className: "list-item"}, 
         React.createElement(Paper, {className: "avatar", zDepth: 2, circle: true}, 
-          React.createElement(AvatarImage, {img: this.props.character.portrait, sex: this.props.character.sex})
+          React.createElement(HFAvatarImage, {img: this.props.character.portrait, sex: this.props.character.sex})
         ), 
-        React.createElement(Paper, {className: "name paper", zDepth: 2}, 
-          React.createElement("div", {className: "inner"}, this.props.character.name)
+        React.createElement(Paper, {className: "info paper", zDepth: 2}, 
+          React.createElement("div", {className: "inner"}, 
+            React.createElement("div", {className: "name"}, this.props.character.name), 
+            React.createElement("div", {className: "details"}, 
+              React.createElement("span", {className: "system"}, this.props.character.system), 
+              React.createElement("span", {className: "level"}, "LVL ", this.props.character.level)
+            )
+          )
         )
       )
     );
@@ -1982,8 +1988,8 @@ var CharacterListItem = React.createClass({displayName: "CharacterListItem",
 
 });
 
-module.exports = CharacterListItem;
-},{"./AvatarImage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\AvatarImage.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBar.jsx":[function(require,module,exports){
+module.exports = HFCharacterListItem;
+},{"./HFAvatarImage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFAvatarImage.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBar.jsx":[function(require,module,exports){
 var React = require('react'),
 
     Navigation = require('react-router').Navigation,
@@ -2045,7 +2051,7 @@ var HFMenuBarTitle = React.createClass({displayName: "HFMenuBarTitle",
     } else if (this.props.title === null) {
       return (
         React.createElement("div", {className: "title"}, 
-          React.createElement("img", {src: "css/pf-logo-title.png"})
+          React.createElement("img", {src: "images/pf-logo-title.png"})
         )
       );
     } else {
@@ -2152,15 +2158,15 @@ var UserStore = Reflux.createStore({
     _user = {
       name: 'Bob',
       characters: [
-        {name: 'Faramir', sex:'male'},
-        {name: 'Galadriel', sex:'female'},
-        {name: 'Arras Theirin The Amazing', sex:'male'},
-        {name: 'Jim', sex:'male'},
-        {name: 'Buttercup', sex:'female'},
-        {name: 'Wesley', sex:'male'},
-        {name: 'Lord of Everything', sex:'male'},
-        {name: 'Sue', sex:'female'},
-        {name: 'Trevor', sex:'male'}
+        {name: 'Faramir',       sex:'male',      system:'Pathfinder', level:1},
+        {name: 'Galadriel',     sex:'female',    system:'D&D 5th',    level:4},
+        {name: 'Arras Theirin', sex:'male',      system:'D&D 5th',    level:1},
+        {name: 'Jim',           sex:'male',      system:'Pathfinder', level:2},
+        {name: 'Buttercup',     sex:'female',    system:'D&D 5th',    level:1},
+        {name: 'Wesley',        sex:'male',      system:'Pathfinder', level:3},
+        {name: 'Lord of Everything', sex:'male', system:'D&D 5th',    level:5},
+        {name: 'Sue',           sex:'female',    system:'Pathfinder', level:4},
+        {name: 'Trevor',        sex:'male',      system:'Pathfinder', level:3}
       ]
     };
     this.trigger(_user);

@@ -13,15 +13,15 @@ var UserStore = Reflux.createStore({
     _user = {
       name: 'Bob',
       characters: [
-        {name: 'Faramir', sex:'male'},
-        {name: 'Galadriel', sex:'female'},
-        {name: 'Arras Theirin The Amazing', sex:'male'},
-        {name: 'Jim', sex:'male'},
-        {name: 'Buttercup', sex:'female'},
-        {name: 'Wesley', sex:'male'},
-        {name: 'Lord of Everything', sex:'male'},
-        {name: 'Sue', sex:'female'},
-        {name: 'Trevor', sex:'male'}
+        {name: 'Faramir',       sex:'male',      system:'Pathfinder', level:1},
+        {name: 'Galadriel',     sex:'female',    system:'D&D 5th',    level:4},
+        {name: 'Arras Theirin', sex:'male',      system:'D&D 5th',    level:1},
+        {name: 'Jim',           sex:'male',      system:'Pathfinder', level:2},
+        {name: 'Buttercup',     sex:'female',    system:'D&D 5th',    level:1},
+        {name: 'Wesley',        sex:'male',      system:'Pathfinder', level:3},
+        {name: 'Lord of Everything', sex:'male', system:'D&D 5th',    level:5},
+        {name: 'Sue',           sex:'female',    system:'Pathfinder', level:4},
+        {name: 'Trevor',        sex:'male',      system:'Pathfinder', level:3}
       ]
     };
     this.trigger(_user);

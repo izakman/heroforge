@@ -1,6 +1,6 @@
 var React = require('react');
 
-var AvatarImage = React.createClass({
+var HFAvatarImage = React.createClass({
 
   render: function() {
     return (
@@ -22,4 +22,4 @@ var AvatarImage = React.createClass({
 
 });
 
-module.exports = AvatarImage;
+module.exports = HFAvatarImage;

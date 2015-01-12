@@ -9,7 +9,7 @@ var React = require('react'),
     CharacterActions = require('./actions/CharacterActions.js'),
     RouteActions = require('./actions/RouteActions.js'),
     
-    CharacterListItem = require('./components/CharacterListItem.jsx');
+    HFCharacterListItem = require('./components/HFCharacterListItem.jsx');
 
 
 var CharacterList = React.createClass({
@@ -44,7 +44,7 @@ var CharacterList = React.createClass({
             {this.props.user.characters.map(function(character) {
               return (
                 <li onClick={CharacterActions.loadCharacter.bind(null, character, 'editor')}>
-                  <CharacterListItem character={character} />
+                  <HFCharacterListItem character={character} />
                 </li>
               );
             }.bind(this))}
