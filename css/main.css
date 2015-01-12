@@ -5746,6 +5746,9 @@ p {
   }
 }
 @media screen and (max-width: 380px) {
+  .hf-mode.page {
+    padding: 6px;
+  }
   .hf-mode.list ul li {
     height: 80px;
   }
