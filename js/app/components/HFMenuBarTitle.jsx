@@ -10,16 +10,16 @@ var HFMenuBarTitle = React.createClass({
           <div className="subtitle">{this.props.subtitle}</div>
         </div>
       );
-    } else if (this.props.title === null) {
+    } else if (this.props.title) {
       return (
         <div className="title">
-          <img src="images/hf-logo-title.png"/>
+          <div>{this.props.title}</div>
         </div>
       );
     } else {
       return (
         <div className="title">
-          <div>{this.props.title}</div>
+          <img src="images/hf-logo-title.png"/>
         </div>
       );
     }

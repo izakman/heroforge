@@ -7,13 +7,11 @@ var HFPage = React.createClass({
 
   render: function() {
     return (
-      <div className="hf-mode page">
-        <Paper className="paper" zDepth={2}>
-          <div className="inner">
-            {this.props.children}
-          </div>
-        </Paper>
-      </div>
+      <Paper className="paper" zDepth={2}>
+        <div className="inner">
+          {this.props.children}
+        </div>
+      </Paper>
     );
   }
 

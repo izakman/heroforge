@@ -27,8 +27,8 @@ Object.extend();
 var routes = (
   <Route name="home" handler={HeroForge} path="/">
     <DefaultRoute handler={CharacterList} />
-    <Route name="editor" handler={CharacterEditor} />
-    <Route name="player" handler={CharacterPlayer} />
+    <Route name="editor" route="editor" handler={CharacterEditor} />
+    <Route name="player" route="player" handler={CharacterPlayer} />
     <NotFoundRoute handler={CharacterList}/>
   </Route>
 );

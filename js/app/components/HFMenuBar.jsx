@@ -20,7 +20,7 @@ var HFMenuBar = React.createClass({
       <Paper id="pf-menubar" className="paper" zDepth={2} rounded={false} >
         <div className="inner">
           <div className="left-group">
-            {(this.props.title !== null) ?
+            {(this.props.title) ?
               <RaisedButton label="Back" primary={true} onClick={this.goBack} className="menu-button main"/>
               :
               []

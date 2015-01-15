@@ -1679,8 +1679,8 @@ Object.extend();
 var routes = (
   React.createElement(Route, {name: "home", handler: HeroForge, path: "/"}, 
     React.createElement(DefaultRoute, {handler: CharacterList}), 
-    React.createElement(Route, {name: "editor", handler: CharacterEditor}), 
-    React.createElement(Route, {name: "player", handler: CharacterPlayer}), 
+    React.createElement(Route, {name: "editor", route: "editor", handler: CharacterEditor}), 
+    React.createElement(Route, {name: "player", route: "player", handler: CharacterPlayer}), 
     React.createElement(NotFoundRoute, {handler: CharacterList})
   )
 );
@@ -1692,18 +1692,16 @@ Router.run(routes, function (Handler) {
 },{"./app/CharacterEditor.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterEditor.jsx","./app/CharacterList.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterList.jsx","./app/CharacterPlayer.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterPlayer.jsx","./app/HeroForge.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\HeroForge.jsx","react-router":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js","react-tap-event-plugin":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-tap-event-plugin\\src\\injectTapEventPlugin.js","react/addons":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\addons.js","sugar":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\sugar\\release\\sugar-full.development.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterEditor.jsx":[function(require,module,exports){
 var React = require('react'),
     
-    Navigation = require('react-router').Navigation,
-    
     Reflux = require('reflux'),
     UserStore = require('./stores/UserStore.js'),
     CharacterActions = require('./actions/CharacterActions.js'),
     RouteActions = require('./actions/RouteActions.js'),
     
+    HFRouteWrapper = require('./components/HFRouteWrapper.jsx'),
     HFPage = require('./components/HFPage.jsx');
 
 
 var CharacterEditor = React.createClass({displayName: "CharacterEditor",
-  mixins: [Navigation],
   
   statics: {
     willTransitionTo: function (transition) {
@@ -1711,28 +1709,25 @@ var CharacterEditor = React.createClass({displayName: "CharacterEditor",
     }
   },
   
-  componentWillMount: function() {
-    RouteActions.setTitle({title: this.props.character.name, subtitle: "Editing"});
-  },
-  
   render: function() {
     var character = this.props.character;
     return (
-      React.createElement(HFPage, null, 
-        
-        (character) ?
-            React.createElement("h4", null, React.createElement("strong", null, "Editing a character called ", character.name))
-            :
-            React.createElement("p", null, "Error, can't load character"), 
-            
-        React.createElement("div", {id: "lipsum"}, 
-          React.createElement("p", null, "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas consequat neque congue varius porta. Suspendisse euismod nisl massa, ut condimentum dui faucibus id. Duis mattis, sapien a facilisis tristique, est diam blandit mi, sed cursus tortor felis eget ligula. "), 
-          React.createElement("p", null, "Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Aenean justo felis, malesuada eget quam sed, vulputate condimentum turpis. "), 
-          React.createElement("p", null, "Aliquam erat volutpat. Aenean faucibus, felis ac consectetur congue, nisi nunc malesuada odio, a iaculis ante purus a massa. Suspendisse semper pretium sapien, in viverra nibh. Phasellus commodo eget purus non bibendum. Vivamus id convallis odio. Fusce quis augue vestibulum, vehicula dolor in, dignissim justo. Sed vitae blandit sem, eu consectetur ante. Praesent commodo, ipsum ac sagittis malesuada, justo neque rhoncus velit, ut ultrices arcu ex id nunc."), 
-          React.createElement("p", null, "Nulla rutrum magna ac tempus sollicitudin. Sed eget venenatis nibh. Integer erat magna, ultrices a massa sit amet, scelerisque ultrices ante. Praesent sit amet scelerisque nunc, ac placerat ante. Nunc consequat enim augue, vitae consequat ligula bibendum non. Quisque egestas felis et ipsum condimentum tempus. Integer gravida ligula porta, tincidunt nisl in, rutrum metus."), 
-          React.createElement("p", null, "Quisque eu velit non urna porttitor malesuada nec interdum mauris. Morbi nec porta ex. Fusce porta magna ac tortor lobortis mattis. Vivamus elementum fringilla mi. Curabitur maximus, felis ac fermentum maximus, urna nisl blandit purus, at elementum nisl justo at neque. Nunc fermentum ante lorem, nec placerat odio rhoncus sit amet. Phasellus vitae nisl gravida, pretium ex sed, semper enim. Sed diam justo, euismod at iaculis sit amet, ullamcorper ut urna. Nunc porttitor bibendum eros, mattis volutpat elit ornare non.")
+      React.createElement(HFRouteWrapper, {className: "hf-mode page", user: this.props.user, title: character.name, subtitle: "Editing"}, 
+        React.createElement(HFPage, null, 
+          (character) ?
+              React.createElement("h4", null, React.createElement("strong", null, "Editing a character called ", character.name))
+              :
+              React.createElement("p", null, "Error, can't load character"), 
+              
+          React.createElement("div", {id: "lipsum"}, 
+            React.createElement("p", null, "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas consequat neque congue varius porta. Suspendisse euismod nisl massa, ut condimentum dui faucibus id. Duis mattis, sapien a facilisis tristique, est diam blandit mi, sed cursus tortor felis eget ligula. "), 
+            React.createElement("p", null, "Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Aenean justo felis, malesuada eget quam sed, vulputate condimentum turpis. "), 
+            React.createElement("p", null, "Aliquam erat volutpat. Aenean faucibus, felis ac consectetur congue, nisi nunc malesuada odio, a iaculis ante purus a massa. Suspendisse semper pretium sapien, in viverra nibh. Phasellus commodo eget purus non bibendum. Vivamus id convallis odio. Fusce quis augue vestibulum, vehicula dolor in, dignissim justo. Sed vitae blandit sem, eu consectetur ante. Praesent commodo, ipsum ac sagittis malesuada, justo neque rhoncus velit, ut ultrices arcu ex id nunc."), 
+            React.createElement("p", null, "Nulla rutrum magna ac tempus sollicitudin. Sed eget venenatis nibh. Integer erat magna, ultrices a massa sit amet, scelerisque ultrices ante. Praesent sit amet scelerisque nunc, ac placerat ante. Nunc consequat enim augue, vitae consequat ligula bibendum non. Quisque egestas felis et ipsum condimentum tempus. Integer gravida ligula porta, tincidunt nisl in, rutrum metus."), 
+            React.createElement("p", null, "Quisque eu velit non urna porttitor malesuada nec interdum mauris. Morbi nec porta ex. Fusce porta magna ac tortor lobortis mattis. Vivamus elementum fringilla mi. Curabitur maximus, felis ac fermentum maximus, urna nisl blandit purus, at elementum nisl justo at neque. Nunc fermentum ante lorem, nec placerat odio rhoncus sit amet. Phasellus vitae nisl gravida, pretium ex sed, semper enim. Sed diam justo, euismod at iaculis sit amet, ullamcorper ut urna. Nunc porttitor bibendum eros, mattis volutpat elit ornare non.")
+          )
+          
         )
-        
       )
     );
   }
@@ -1740,27 +1735,21 @@ var CharacterEditor = React.createClass({displayName: "CharacterEditor",
 });
 
 module.exports = CharacterEditor;
-},{"./actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFPage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFPage.jsx","./stores/UserStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\UserStore.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react-router":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterList.jsx":[function(require,module,exports){
+},{"./actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFPage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFPage.jsx","./components/HFRouteWrapper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx","./stores/UserStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\UserStore.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterList.jsx":[function(require,module,exports){
 var React = require('react'),
 
     mui = require('material-ui'),
     Paper = mui.Paper,
     
-    Navigation = require('react-router').Navigation,
-    
     Reflux = require('reflux'),
     CharacterActions = require('./actions/CharacterActions.js'),
     RouteActions = require('./actions/RouteActions.js'),
     
+    HFRouteWrapper = require('./components/HFRouteWrapper.jsx');
     HFCharacterListItem = require('./components/HFCharacterListItem.jsx');
 
 
 var CharacterList = React.createClass({displayName: "CharacterList",
-  mixins: [Navigation],
-  
-  componentWillMount: function() {
-    RouteActions.setTitle({title: null}, true);
-  },
   
   editCharacter: function(character) {
     CharacterActions.loadCharacter(character, "editor");
@@ -1770,19 +1759,15 @@ var CharacterList = React.createClass({displayName: "CharacterList",
   },
   
   render: function() {
-    if (this.props.user === null) {
-      return (
-        React.createElement("div", {className: "hf-mode list"}, 
+    return (
+      React.createElement(HFRouteWrapper, {className: "hf-mode list", user: this.props.user}, 
+        (this.props.user === null) ?
           React.createElement("div", {className: "login-notice"}, 
             React.createElement(Paper, {className: "paper", zDepth: 2}, 
               React.createElement("div", {className: "inner"}, "Please login to access characters")
             )
           )
-        )
-      );
-    } else {
-      return (
-        React.createElement("div", {className: "hf-mode list"}, 
+          :
           React.createElement("ul", null, 
             this.props.user.characters.map(function(character) {
               return (
@@ -1792,49 +1777,52 @@ var CharacterList = React.createClass({displayName: "CharacterList",
               );
             }.bind(this))
           )
-        )
-      );
-    }
+        
+      )
+    );
   }
 });
 
 module.exports = CharacterList;
-},{"./actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFCharacterListItem.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFCharacterListItem.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react-router":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterPlayer.jsx":[function(require,module,exports){
+},{"./actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFCharacterListItem.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFCharacterListItem.jsx","./components/HFRouteWrapper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterPlayer.jsx":[function(require,module,exports){
 var React = require('react'),
-    
-    Navigation = require('react-router').Navigation,
     
     Reflux = require('reflux'),
     UserStore = require('./stores/UserStore.js'),
     CharacterActions = require('./actions/CharacterActions.js'),
     RouteActions = require('./actions/RouteActions.js'),
     
+    HFRouteWrapper = require('./components/HFRouteWrapper.jsx'),
     HFPage = require('./components/HFPage.jsx');
 
 
 var CharacterPlayer = React.createClass({displayName: "CharacterPlayer",
-  mixins: [Navigation],
   
   statics: {
     willTransitionTo: function (transition) {
       if (!UserStore.isLoggedIn()) transition.redirect("home");
     }
   },
-  
-  componentWillMount: function() {
-    RouteActions.setTitle({title: this.props.character.name, subtitle: "Play Mode"});
-  },
    
   render: function() {
     var character = this.props.character;
     return (
-      React.createElement(HFPage, null, 
-        React.createElement("p", null, React.createElement("a", {onClick: this.goBack}, "Back")), 
-        
-        (this.props.character) ?
-            React.createElement("p", null, "Playing a character called ", character.name)
-            :
-            React.createElement("p", null, "Error, can't load character")
+      React.createElement(HFRouteWrapper, {className: "hf-mode page", user: this.props.user, title: character.name, subtitle: "Play Mode"}, 
+        React.createElement(HFPage, null, 
+          (character) ?
+              React.createElement("h4", null, React.createElement("strong", null, "Playing a character called ", character.name))
+              :
+              React.createElement("p", null, "Error, can't load character"), 
+              
+          React.createElement("div", {id: "lipsum"}, 
+            React.createElement("p", null, "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas consequat neque congue varius porta. Suspendisse euismod nisl massa, ut condimentum dui faucibus id. Duis mattis, sapien a facilisis tristique, est diam blandit mi, sed cursus tortor felis eget ligula. "), 
+            React.createElement("p", null, "Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Aenean justo felis, malesuada eget quam sed, vulputate condimentum turpis. "), 
+            React.createElement("p", null, "Aliquam erat volutpat. Aenean faucibus, felis ac consectetur congue, nisi nunc malesuada odio, a iaculis ante purus a massa. Suspendisse semper pretium sapien, in viverra nibh. Phasellus commodo eget purus non bibendum. Vivamus id convallis odio. Fusce quis augue vestibulum, vehicula dolor in, dignissim justo. Sed vitae blandit sem, eu consectetur ante. Praesent commodo, ipsum ac sagittis malesuada, justo neque rhoncus velit, ut ultrices arcu ex id nunc."), 
+            React.createElement("p", null, "Nulla rutrum magna ac tempus sollicitudin. Sed eget venenatis nibh. Integer erat magna, ultrices a massa sit amet, scelerisque ultrices ante. Praesent sit amet scelerisque nunc, ac placerat ante. Nunc consequat enim augue, vitae consequat ligula bibendum non. Quisque egestas felis et ipsum condimentum tempus. Integer gravida ligula porta, tincidunt nisl in, rutrum metus."), 
+            React.createElement("p", null, "Quisque eu velit non urna porttitor malesuada nec interdum mauris. Morbi nec porta ex. Fusce porta magna ac tortor lobortis mattis. Vivamus elementum fringilla mi. Curabitur maximus, felis ac fermentum maximus, urna nisl blandit purus, at elementum nisl justo at neque. Nunc fermentum ante lorem, nec placerat odio rhoncus sit amet. Phasellus vitae nisl gravida, pretium ex sed, semper enim. Sed diam justo, euismod at iaculis sit amet, ullamcorper ut urna. Nunc porttitor bibendum eros, mattis volutpat elit ornare non.")
+          )
+          
+        )
       )
     );
   }
@@ -1842,7 +1830,7 @@ var CharacterPlayer = React.createClass({displayName: "CharacterPlayer",
 });
 
 module.exports = CharacterPlayer;
-},{"./actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFPage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFPage.jsx","./stores/UserStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\UserStore.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react-router":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\HeroForge.jsx":[function(require,module,exports){
+},{"./actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFPage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFPage.jsx","./components/HFRouteWrapper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx","./stores/UserStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\UserStore.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\HeroForge.jsx":[function(require,module,exports){
 var React = require('react'),
     
     Router = require('react-router'),
@@ -1880,25 +1868,11 @@ var HeroForge = React.createClass({displayName: "HeroForge",
     this.setState({currentCharacter: character});
     if (mode) this.transitionTo(mode);
   },
-  onRouteChange: function(route) {
-    this.setState({route: route});
-  },
   
   render: function() {
     return (
       React.createElement("div", {id: "heroforge"}, 
-        React.createElement(HFMenuBar, {user: this.state.user, title: this.state.route.title, subtitle: this.state.route.subtitle}), 
-        
-        /*<ul>
-          <li><a onClick={RouteActions.goToList}>Characters</a></li>
-          <li><a onClick={RouteActions.goToEditor}>Editor</a></li>
-          <li><a onClick={RouteActions.goToPlayer}>Player</a></li>
-        </ul>*/
-        
-        React.createElement("div", {className: "main-wrapper"}, 
-          React.createElement(RouteHandler, {user: this.state.user, character: this.state.currentCharacter})
-        )
-        
+        React.createElement(RouteHandler, {user: this.state.user, character: this.state.currentCharacter})
       )
     );
   }
@@ -2012,7 +1986,7 @@ var HFMenuBar = React.createClass({displayName: "HFMenuBar",
       React.createElement(Paper, {id: "pf-menubar", className: "paper", zDepth: 2, rounded: false}, 
         React.createElement("div", {className: "inner"}, 
           React.createElement("div", {className: "left-group"}, 
-            (this.props.title !== null) ?
+            (this.props.title) ?
               React.createElement(RaisedButton, {label: "Back", primary: true, onClick: this.goBack, className: "menu-button main"})
               :
               []
@@ -2048,16 +2022,16 @@ var HFMenuBarTitle = React.createClass({displayName: "HFMenuBarTitle",
           React.createElement("div", {className: "subtitle"}, this.props.subtitle)
         )
       );
-    } else if (this.props.title === null) {
+    } else if (this.props.title) {
       return (
         React.createElement("div", {className: "title"}, 
-          React.createElement("img", {src: "images/hf-logo-title.png"})
+          React.createElement("div", null, this.props.title)
         )
       );
     } else {
       return (
         React.createElement("div", {className: "title"}, 
-          React.createElement("div", null, this.props.title)
+          React.createElement("img", {src: "images/hf-logo-title.png"})
         )
       );
     }
@@ -2076,9 +2050,32 @@ var HFPage = React.createClass({displayName: "HFPage",
 
   render: function() {
     return (
-      React.createElement("div", {className: "hf-mode page"}, 
-        React.createElement(Paper, {className: "paper", zDepth: 2}, 
-          React.createElement("div", {className: "inner"}, 
+      React.createElement(Paper, {className: "paper", zDepth: 2}, 
+        React.createElement("div", {className: "inner"}, 
+          this.props.children
+        )
+      )
+    );
+  }
+
+});
+
+module.exports = HFPage;
+},{"material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx":[function(require,module,exports){
+var React = require('react'),
+    
+    HFMenuBar = require('./HFMenuBar.jsx');
+
+
+var HFRouteWrapper = React.createClass({displayName: "HFRouteWrapper",
+
+  render: function() {
+    return (
+      React.createElement("div", null, 
+        React.createElement(HFMenuBar, {user: this.props.user, title: this.props.title, subtitle: this.props.subtitle}), 
+        
+        React.createElement("div", {className: "main-wrapper"}, 
+          React.createElement("div", {className: this.props.className}, 
             this.props.children
           )
         )
@@ -2088,8 +2085,8 @@ var HFPage = React.createClass({displayName: "HFPage",
 
 });
 
-module.exports = HFPage;
-},{"material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\CharacterStore.js":[function(require,module,exports){
+module.exports = HFRouteWrapper;
+},{"./HFMenuBar.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBar.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\CharacterStore.js":[function(require,module,exports){
 var Reflux = require('reflux'),
     RouteActions = require('../actions/RouteActions.js'),
     CharacterActions = require('../actions/CharacterActions.js');

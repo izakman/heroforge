@@ -35,25 +35,11 @@ var HeroForge = React.createClass({
     this.setState({currentCharacter: character});
     if (mode) this.transitionTo(mode);
   },
-  onRouteChange: function(route) {
-    this.setState({route: route});
-  },
   
   render: function() {
     return (
       <div id="heroforge">
-        <HFMenuBar user={this.state.user} title={this.state.route.title} subtitle={this.state.route.subtitle} />
-        
-        {/*<ul>
-          <li><a onClick={RouteActions.goToList}>Characters</a></li>
-          <li><a onClick={RouteActions.goToEditor}>Editor</a></li>
-          <li><a onClick={RouteActions.goToPlayer}>Player</a></li>
-        </ul>*/}
-        
-        <div className="main-wrapper">
-          <RouteHandler user={this.state.user} character={this.state.currentCharacter} />
-        </div>
-        
+        <RouteHandler user={this.state.user} character={this.state.currentCharacter} />
       </div>
     );
   }
