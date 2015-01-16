@@ -25,6 +25,9 @@ var CharacterList = React.createClass({
       <HFRouteWrapper className="hf-mode list" user={this.props.user}>
         {(this.props.user) ?
           <ul>
+            <li onClick={CharacterActions.newCharacter}>
+              <HFCharacterListItem newCreator={true} character={{name:'New Character'}} />
+            </li>
             {this.props.user.characters.map(function(character) {
               return (
                 <li onClick={CharacterActions.loadCharacter.bind(null, character, 'editor')}>

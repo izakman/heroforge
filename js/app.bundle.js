@@ -1763,6 +1763,9 @@ var CharacterList = React.createClass({displayName: "CharacterList",
       React.createElement(HFRouteWrapper, {className: "hf-mode list", user: this.props.user}, 
         (this.props.user) ?
           React.createElement("ul", null, 
+            React.createElement("li", {onClick: CharacterActions.newCharacter}, 
+              React.createElement(HFCharacterListItem, {newCreator: true, character: {name:'New Character'}})
+            ), 
             this.props.user.characters.map(function(character) {
               return (
                 React.createElement("li", {onClick: CharacterActions.loadCharacter.bind(null, character, 'editor')}, 
@@ -1942,17 +1945,22 @@ var React = require('react'),
 var HFCharacterListItem = React.createClass({displayName: "HFCharacterListItem",
   
   render: function() {
+    var newClass = (this.props.newCreator) ? "new" : " ";
     return (
-      React.createElement("div", {className: "list-item"}, 
+      React.createElement("div", {className: "list-item " + newClass}, 
         React.createElement(Paper, {className: "avatar", zDepth: 2, circle: true}, 
-          React.createElement(HFAvatarImage, {img: this.props.character.portrait, sex: this.props.character.sex})
+          (this.props.newCreator) ?
+            React.createElement("div", {className: "plus"}, "+")
+            :
+            React.createElement(HFAvatarImage, {img: this.props.character.portrait, sex: this.props.character.sex})
+          
         ), 
         React.createElement(Paper, {className: "info paper", zDepth: 2}, 
           React.createElement("div", {className: "inner"}, 
             React.createElement("div", {className: "name"}, this.props.character.name), 
             React.createElement("div", {className: "details"}, 
-              React.createElement("span", {className: "system"}, this.props.character.system), 
-              React.createElement("span", {className: "level"}, "LVL ", this.props.character.level)
+              React.createElement("span", {className: "level"}, "LVL ", this.props.character.level || 0), 
+              React.createElement("span", {className: "system"}, this.props.character.system || ' ')
             )
           )
         )
