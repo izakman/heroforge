@@ -5464,7 +5464,11 @@ p {
   line-height: 25px;
 }
 #heroforge {
+  position: absolute;
+  top: 0px;
+  left: 0px;
   min-height: 100%;
+  width: 100%;
   background: #643e1b url("images/woodplanks.jpg") repeat;
   -webkit-box-shadow: inset 0px 0px 100px 20px rgba(24, 12, 1, 0.7);
   -moz-box-shadow: inset 0px 0px 100px 20px rgba(24, 12, 1, 0.7);
