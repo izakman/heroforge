@@ -1763,12 +1763,12 @@ var CharacterList = React.createClass({displayName: "CharacterList",
       React.createElement(HFRouteWrapper, {className: "hf-mode list", user: this.props.user}, 
         (this.props.user) ?
           React.createElement("ul", null, 
-            React.createElement("li", {onClick: CharacterActions.newCharacter}, 
+            React.createElement("li", {onTouchTap: CharacterActions.newCharacter}, 
               React.createElement(HFCharacterListItem, {newCreator: true, character: {name:'New Character'}})
             ), 
             this.props.user.characters.map(function(character) {
               return (
-                React.createElement("li", {onClick: CharacterActions.loadCharacter.bind(null, character, 'editor')}, 
+                React.createElement("li", {onTouchTap: CharacterActions.loadCharacter.bind(null, character, 'editor')}, 
                   React.createElement(HFCharacterListItem, {character: character})
                 )
               );
@@ -1934,7 +1934,28 @@ var HFAvatarImage = React.createClass({displayName: "HFAvatarImage",
 });
 
 module.exports = HFAvatarImage;
-},{"react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFCharacterListItem.jsx":[function(require,module,exports){
+},{"react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFButton.jsx":[function(require,module,exports){
+var React = require('react'),
+
+    mui = require('material-ui'),
+    RaisedButton = mui.RaisedButton;
+
+var HFButton = React.createClass({displayName: "HFButton",
+    
+  buttonClick: function () {
+    this.props.onTouchTap();
+  },
+
+  render: function() {
+    return (
+      React.createElement(RaisedButton, React.__spread({},  this.props, {onTouchTap: this.buttonClick}))
+    );
+  }
+
+});
+
+module.exports = HFButton;
+},{"material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFCharacterListItem.jsx":[function(require,module,exports){
 var React = require('react'),
 
     mui = require('material-ui'),
@@ -1977,13 +1998,13 @@ var React = require('react'),
     Navigation = require('react-router').Navigation,
     
     mui = require('material-ui'),
-    Paper      = mui.Paper,
-    RaisedButton = mui.RaisedButton,
+    Paper = mui.Paper,
     
     UserActions  = require('../actions/UserActions.js'),
     RouteActions = require('../actions/RouteActions.js'),
     
-    HFMenuBarTitle = require('./HFMenuBarTitle.jsx');
+    HFMenuBarTitle = require('./HFMenuBarTitle.jsx'),
+    HFButton = require('./HFButton.jsx');
 
 var HFMenuBar = React.createClass({displayName: "HFMenuBar",
   mixins: [Navigation],
@@ -1995,7 +2016,7 @@ var HFMenuBar = React.createClass({displayName: "HFMenuBar",
         React.createElement("div", {className: "inner"}, 
           React.createElement("div", {className: "left-group"}, 
             (this.props.title) ?
-              React.createElement(RaisedButton, {label: "Back", primary: true, onClick: this.goBack, className: "menu-button main"})
+              React.createElement(HFButton, {label: "Back", primary: true, onTouchTap: this.goBack, className: "menu-button main"})
               :
               []
             
@@ -2005,9 +2026,9 @@ var HFMenuBar = React.createClass({displayName: "HFMenuBar",
           
           React.createElement("div", {className: "right-group menu-options"}, 
             (this.props.user) ?
-              React.createElement(RaisedButton, {label: "Logout", primary: true, className: "menu-button", onClick: UserActions.logout})
+              React.createElement(HFButton, {label: "Logout", primary: true, className: "menu-button", onTouchTap: UserActions.logout})
               :
-              React.createElement(RaisedButton, {label: "Login", primary: true, className: "menu-button", onClick: UserActions.login})
+              React.createElement(HFButton, {label: "Login", primary: true, className: "menu-button", onTouchTap: UserActions.login})
             
           )
         )
@@ -2018,7 +2039,7 @@ var HFMenuBar = React.createClass({displayName: "HFMenuBar",
 });
 
 module.exports = HFMenuBar;
-},{"../actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","../actions/UserActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\UserActions.js","./HFMenuBarTitle.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBarTitle.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react-router":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBarTitle.jsx":[function(require,module,exports){
+},{"../actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","../actions/UserActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\UserActions.js","./HFButton.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFButton.jsx","./HFMenuBarTitle.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBarTitle.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react-router":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBarTitle.jsx":[function(require,module,exports){
 var React = require('react');
 
 var HFMenuBarTitle = React.createClass({displayName: "HFMenuBarTitle",
