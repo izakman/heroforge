@@ -30,10 +30,11 @@ var HFMenuBar = React.createClass({
           <HFMenuBarTitle title={this.props.title} subtitle={this.props.subtitle} />
           
           <div className="right-group menu-options">
-            {(this.props.user === null) ?
-                <RaisedButton label="Login" primary={true} className="menu-button" onClick={UserActions.login}/>
-                : 
-                <RaisedButton label="Logout" primary={true} className="menu-button" onClick={UserActions.logout}/>}
+            {(this.props.user) ?
+              <RaisedButton label="Logout" primary={true} className="menu-button" onClick={UserActions.logout}/>
+              :
+              <RaisedButton label="Login" primary={true} className="menu-button" onClick={UserActions.login}/>
+            }
           </div>
         </div>
       </Paper>

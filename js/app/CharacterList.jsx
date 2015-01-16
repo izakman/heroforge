@@ -23,13 +23,7 @@ var CharacterList = React.createClass({
   render: function() {
     return (
       <HFRouteWrapper className="hf-mode list" user={this.props.user}>
-        {(this.props.user === null) ?
-          <div className="login-notice">
-            <Paper className="paper" zDepth={2}>
-              <div className="inner">Please login to access characters</div>
-            </Paper>
-          </div>
-          :
+        {(this.props.user) ?
           <ul>
             {this.props.user.characters.map(function(character) {
               return (
@@ -39,6 +33,12 @@ var CharacterList = React.createClass({
               );
             }.bind(this))}
           </ul>
+          :
+          <div className="login-notice">
+            <Paper className="paper" zDepth={2}>
+              <div className="inner">Please login to access characters</div>
+            </Paper>
+          </div>
         }
       </HFRouteWrapper>
     );
