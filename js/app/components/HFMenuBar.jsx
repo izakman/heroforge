@@ -3,13 +3,13 @@ var React = require('react'),
     Navigation = require('react-router').Navigation,
     
     mui = require('material-ui'),
-    Paper      = mui.Paper,
-    RaisedButton = mui.RaisedButton,
+    Paper = mui.Paper,
     
     UserActions  = require('../actions/UserActions.js'),
     RouteActions = require('../actions/RouteActions.js'),
     
-    HFMenuBarTitle = require('./HFMenuBarTitle.jsx');
+    HFMenuBarTitle = require('./HFMenuBarTitle.jsx'),
+    HFButton = require('./HFButton.jsx');
 
 var HFMenuBar = React.createClass({
   mixins: [Navigation],
@@ -21,7 +21,7 @@ var HFMenuBar = React.createClass({
         <div className="inner">
           <div className="left-group">
             {(this.props.title) ?
-              <RaisedButton label="Back" primary={true} onClick={this.goBack} className="menu-button main"/>
+              <HFButton label="Back" primary={true} onTouchTap={this.goBack} className="menu-button main"/>
               :
               []
             }
@@ -30,10 +30,11 @@ var HFMenuBar = React.createClass({
           <HFMenuBarTitle title={this.props.title} subtitle={this.props.subtitle} />
           
           <div className="right-group menu-options">
-            {(this.props.user === null) ?
-                <RaisedButton label="Login" primary={true} className="menu-button" onClick={UserActions.login}/>
-                : 
-                <RaisedButton label="Logout" primary={true} className="menu-button" onClick={UserActions.logout}/>}
+            {(this.props.user) ?
+              <HFButton label="Logout" primary={true} className="menu-button" onTouchTap={UserActions.logout}/>
+              :
+              <HFButton label="Login" primary={true} className="menu-button" onTouchTap={UserActions.login}/>
+            }
           </div>
         </div>
       </Paper>

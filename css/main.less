@@ -21,7 +21,7 @@ p {
 @menupadding: 11px;
 @menuheight: 52px;
 
-@shinecolor: #9D8671;
+@shinecolor: #a59689;
 
 
 .v-center() {
@@ -55,7 +55,11 @@ p {
 }
 
 #heroforge {
+  position: absolute;
+  top: 0px;
+  left: 0px;
   min-height: 100%;
+  width: 100%;
   background: #643E1B url("./images/woodplanks.jpg") repeat;
   //bg from: http://forum.unity3d.com/threads/free-handpainted-wood-planking-texture.128779/
   .lh-box-shadow(inset 0px 0px 100px 20px rgba(24, 12, 1, 0.7));
@@ -67,7 +71,7 @@ p {
 }
 
 .paper {
-  background: rgba(255, 238, 192, 0.90) url("./images/paper-over.png") repeat;
+  background: fade(@paper-color, 90%) url("./images/paper-over.png") repeat;
   .inner {
     .lh-box-shadow(inset 0 0 60px 0 rgba(108, 78, 9, 0.30));
   }
@@ -254,17 +258,18 @@ p {
         .info {
           width: 100%;
           margin-top: -20px;
+          overflow: hidden;
+          line-height: 40px;
           .inner {
-            padding: 10px 15px;
-            // padding-top: 20px;
-            // padding-bottom: 10px;
+            padding: 10px 10px;
+            padding-top: 10px;
+            padding-bottom: 10px;
             .lh-box-shadow(inset 0 0 20px 0 rgba(108, 78, 9, 0.30));
             .clearfix();
           }
           .name {
             font-family: @decorativeFontFamily;
             font-size: 20px;
-            line-height: 40px;
             font-weight: bold;
             white-space: nowrap;
             overflow: hidden;
@@ -272,7 +277,7 @@ p {
           }
           .details {
             font-size: 16px;
-            line-height: 20px;
+            line-height: 16px;
             .system {
               float: right;
             }
@@ -282,10 +287,55 @@ p {
             }
           }
         }
+        
+        &.new {
+          .avatar {
+            background-color: @accent-3-color;
+            .plus {
+              font-family: @decorativeFontFamily;
+              line-height: @avatar-size - 20px;
+              font-size: @avatar-size + 15;
+              color: @accent-2-color;
+              text-align: center;
+            }
+            &:before {
+              content: '';
+              position: absolute;
+              height: 190px;
+              width: 40px;
+              background: @shinecolor;
+              top: -40px;
+              left: -70px;
+              display: block;
+              box-shadow: 0px 0px 30px 5px @shinecolor; 
+              transform: rotate(-20deg);
+              transition: all 0.3s ease;
+            }
+          }
+          &:hover .avatar:before {
+            left: 140px;
+          }
+            
+          .details {
+            display: none;
+          }
+          .info {
+            .name {
+              font-style: italic;
+            }
+          }
+        }
       }
     }
   }
 }
+
+
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
 
 @media screen and (min-width: 1025px) {
   @menuheight-big: 70px;
@@ -329,18 +379,22 @@ p {
   
 
 @media screen and (max-width: 580px) {
+  
+  @avatar-size-small: @avatar-size - 10px;
+  
   .hf-mode.list {
     ul {
       width: 100%;
       li {
         display: block;
         width: 100%;
-        height: @avatar-size;
+        height: @avatar-size-small;
         margin: 0px;
         margin-bottom: 20px;
         .list-item {
           text-align: left;
-          padding-left: @avatar-size/2;
+          padding-left: @avatar-size-small/2;
+          
           .avatar, .info {
             display: inline-block;
           }
@@ -348,35 +402,6 @@ p {
             position: absolute;
             top: 0px;
             left: 0px;
-          }
-          .info {
-            margin: 0px;
-            margin-top: 22px;
-            .inner {
-              padding-left: (@avatar-size/2) + 15px;
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-
-@media screen and (max-width: 380px) {
-  .hf-mode.page {
-    padding: 6px;
-  }
-  
-  @avatar-size-small: 80px;
-  
-  .hf-mode.list {
-    ul {
-      li {
-        height: @avatar-size-small;
-        .list-item {
-          padding-left: @avatar-size-small/2;
-          .avatar {
             width: @avatar-size-small;
             height: @avatar-size-small;
             img, svg {
@@ -390,20 +415,91 @@ p {
             }
           }
           .info {
-            margin-top: 10px;
+            margin: 0px;
+            margin-top: 7px;
+            line-height: 28px;
             .inner {
-              padding: 10px 15px;
-              padding-left: (@avatar-size-small/2) + 10px;
+              padding-left: (@avatar-size-small/2) + 15px;
+            }
+            .details {
+              line-height: 22px;
+              margin-top: 6px;
+            }
+          }
+          
+          &.new {
+            .avatar {
+              .plus {
+                line-height: @avatar-size-small - 18px;
+                font-size: @avatar-size-small + 12px;
+              }
+            }
+            .info {
+              margin-top: 15px;
+            }
+          }
+          
+        }
+      }
+    }
+  }
+}
+
+
+@media screen and (max-width: 380px) {
+  .hf-mode.page {
+    padding: 6px;
+  }
+  
+  @avatar-size-smaller: 80px;
+  
+  .hf-mode.list {
+    ul {
+      li {
+        height: @avatar-size-smaller;
+        .list-item {
+          padding-left: @avatar-size-smaller/2;
+          .avatar {
+            width: @avatar-size-smaller;
+            height: @avatar-size-smaller;
+            img, svg {
+              width: @avatar-size-smaller;
+              height: @avatar-size-smaller;
+            }
+            ;
+            &:after {
+              width: @avatar-size-smaller;
+              height: @avatar-size-smaller;
+            }
+          }
+          .info {
+            margin-top: 5px;
+            .inner {
+              padding: 8px;
+              padding-left: (@avatar-size-smaller/2) + 10px;
             }
             .name {
               font-size: 18px;
-              line-height: 30px;
+              line-height: 25px;
             }
             .details {
               font-size: 14px;
-              line-height: 18px;
+              line-height: 16px;
             }
           }
+          
+          &.new {
+            .avatar {
+              .plus {
+                line-height: @avatar-size-smaller - 15px;
+                font-size: @avatar-size-smaller + 10px;
+              }
+            }
+            .info {
+              margin-top: 12px;
+            }
+          }
+          
         }
       }
     }

@@ -23,22 +23,25 @@ var CharacterList = React.createClass({
   render: function() {
     return (
       <HFRouteWrapper className="hf-mode list" user={this.props.user}>
-        {(this.props.user === null) ?
-          <div className="login-notice">
-            <Paper className="paper" zDepth={2}>
-              <div className="inner">Please login to access characters</div>
-            </Paper>
-          </div>
-          :
+        {(this.props.user) ?
           <ul>
+            <li onTouchTap={CharacterActions.newCharacter}>
+              <HFCharacterListItem newCreator={true} character={{name:'New Character'}} />
+            </li>
             {this.props.user.characters.map(function(character) {
               return (
-                <li onClick={CharacterActions.loadCharacter.bind(null, character, 'editor')}>
+                <li onTouchTap={CharacterActions.loadCharacter.bind(null, character, 'editor')}>
                   <HFCharacterListItem character={character} />
                 </li>
               );
             }.bind(this))}
           </ul>
+          :
+          <div className="login-notice">
+            <Paper className="paper" zDepth={2}>
+              <div className="inner">Please login to access characters</div>
+            </Paper>
+          </div>
         }
       </HFRouteWrapper>
     );
