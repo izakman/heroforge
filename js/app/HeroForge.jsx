@@ -9,6 +9,7 @@ var React = require('react'),
     RouteActions = require('./actions/RouteActions.js'),
     RouteStore   = require('./stores/RouteStore.js'),
     CharacterStore = require('./stores/CharacterStore.js'),
+    SoundStore = require('./stores/SoundStore.js'),
     
     HFMenuBar = require('./components/HFMenuBar.jsx');
 

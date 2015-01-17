@@ -1,11 +1,14 @@
 var React = require('react'),
 
     mui = require('material-ui'),
-    RaisedButton = mui.RaisedButton;
+    RaisedButton = mui.RaisedButton,
+    
+    SoundActions = require('../actions/SoundActions.js');
 
 var HFButton = React.createClass({
     
   buttonClick: function () {
+    SoundActions.playMetal();
     this.props.onTouchTap();
   },
 
