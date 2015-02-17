@@ -17,10 +17,10 @@ var HFMenuBar = React.createClass({
   render: function() {
     
     return (
-      <Paper id="pf-menubar" className="paper" zDepth={2} rounded={false} >
+      <Paper id="pf-menubar" className="menubar paper" zDepth={2} rounded={false} >
         <div className="inner">
           <div className="left-group">
-            {(this.props.title) ?
+            {(this.props.showBack) ? 
               <HFButton label="Back" primary={true} onTouchTap={this.goBack} className="menu-button main"/>
               :
               []

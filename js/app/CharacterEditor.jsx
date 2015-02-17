@@ -20,7 +20,7 @@ var CharacterEditor = React.createClass({
   render: function() {
     var character = this.props.character;
     return (
-      <HFRouteWrapper className="hf-mode page" user={this.props.user} title={character.name} subtitle="Editing">
+      <HFRouteWrapper showBack={true} className="hf-mode page" user={this.props.user} title={character.name} subtitle="Editing">
         <HFPage>
           {(character) ?
               <h4><strong>Editing a character called {character.name}</strong></h4>

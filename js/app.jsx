@@ -12,6 +12,7 @@ var React = require('react/addons'),
     CharacterList   = require("./app/CharacterList.jsx"),
     CharacterEditor = require("./app/CharacterEditor.jsx"),
     CharacterPlayer = require("./app/CharacterPlayer.jsx");
+    Spellbook       = require("./app/Spellbook.jsx");
 
 
 // For browser react tools
@@ -29,6 +30,7 @@ var routes = (
     <DefaultRoute handler={CharacterList} />
     <Route name="editor" route="editor" handler={CharacterEditor} />
     <Route name="player" route="player" handler={CharacterPlayer} />
+    <Route name="spellbook" route="spellbook" handler={Spellbook} />
     <NotFoundRoute handler={CharacterList}/>
   </Route>
 );
