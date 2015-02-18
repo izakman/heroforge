@@ -822,7 +822,7 @@ var HFSpellDialog = React.createClass({displayName: "HFSpellDialog",
     ];
     return (
       React.createElement(Dialog, React.__spread({className: "dialog spell", ref: "dialog"},  this.props, {title: spell.name, actions: dialogActions}), 
-        React.createElement("p", {class: "type"}, type), 
+        React.createElement("p", {className: "type"}, type), 
         React.createElement("ul", {className: "details"}, 
           React.createElement("li", null, 
             React.createElement("span", {className: "name"}, "Casting Time: "), 

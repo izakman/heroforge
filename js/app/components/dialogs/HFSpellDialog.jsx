@@ -24,7 +24,7 @@ var HFSpellDialog = React.createClass({
     ];
     return (
       <Dialog className="dialog spell" ref="dialog" {...this.props} title={spell.name} actions={dialogActions}>
-        <p class="type">{type}</p>
+        <p className="type">{type}</p>
         <ul className="details">
           <li>
             <span className="name">Casting Time: </span>
