@@ -6,8 +6,11 @@ var React = require('react'),
     Reflux = require('reflux'),
     CharacterActions = require('./actions/CharacterActions.js'),
     RouteActions = require('./actions/RouteActions.js'),
+    DialogActions = require('./actions/DialogActions.js'),
     
-    HFRouteWrapper = require('./components/HFRouteWrapper.jsx');
+    HFOpenCharacterDialog = require('./components/dialogs/HFOpenCharacterDialog.jsx'),
+    
+    HFRouteWrapper = require('./components/HFRouteWrapper.jsx'),
     HFCharacterListItem = require('./components/HFCharacterListItem.jsx');
 
 
@@ -20,12 +23,19 @@ var CharacterList = React.createClass({
     CharacterActions.loadCharacter(character, "player");
   },
   
+  newCharacterBox: function() {
+    DialogActions.open({
+      component: HFOpenCharacterDialog,
+      props: {}
+    });
+  },
+  
   render: function() {
     return (
       <HFRouteWrapper className="hf-mode list" user={this.props.user}>
         {(this.props.user) ?
           <ul>
-            <li onTouchTap={CharacterActions.newCharacter}>
+            <li onTouchTap={this.newCharacterBox}>
               <HFCharacterListItem newCreator={true} character={{name:'New Character'}} />
             </li>
             {this.props.user.characters.map(function(character) {

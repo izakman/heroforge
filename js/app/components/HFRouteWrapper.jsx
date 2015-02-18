@@ -1,5 +1,6 @@
 var React = require('react'),
     
+    HFDialogManager = require('./HFDialogManager.jsx'),
     HFMenuBar = require('./HFMenuBar.jsx');
 
 
@@ -15,6 +16,8 @@ var HFRouteWrapper = React.createClass({
             {this.props.children}
           </div>
         </div>
+        
+        <HFDialogManager />
       </div>
     );
   }

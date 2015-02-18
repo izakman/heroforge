@@ -183,8 +183,11 @@ var React = require('react'),
     Reflux = require('reflux'),
     CharacterActions = require('./actions/CharacterActions.js'),
     RouteActions = require('./actions/RouteActions.js'),
+    DialogActions = require('./actions/DialogActions.js'),
     
-    HFRouteWrapper = require('./components/HFRouteWrapper.jsx');
+    HFOpenCharacterDialog = require('./components/dialogs/HFOpenCharacterDialog.jsx'),
+    
+    HFRouteWrapper = require('./components/HFRouteWrapper.jsx'),
     HFCharacterListItem = require('./components/HFCharacterListItem.jsx');
 
 
@@ -197,12 +200,19 @@ var CharacterList = React.createClass({displayName: "CharacterList",
     CharacterActions.loadCharacter(character, "player");
   },
   
+  newCharacterBox: function() {
+    DialogActions.open({
+      component: HFOpenCharacterDialog,
+      props: {}
+    });
+  },
+  
   render: function() {
     return (
       React.createElement(HFRouteWrapper, {className: "hf-mode list", user: this.props.user}, 
         (this.props.user) ?
           React.createElement("ul", null, 
-            React.createElement("li", {onTouchTap: CharacterActions.newCharacter}, 
+            React.createElement("li", {onTouchTap: this.newCharacterBox}, 
               React.createElement(HFCharacterListItem, {newCreator: true, character: {name:'New Character'}})
             ), 
             this.props.user.characters.map(function(character) {
@@ -226,7 +236,7 @@ var CharacterList = React.createClass({displayName: "CharacterList",
 });
 
 module.exports = CharacterList;
-},{"./actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFCharacterListItem.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFCharacterListItem.jsx","./components/HFRouteWrapper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterPlayer.jsx":[function(require,module,exports){
+},{"./actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","./actions/DialogActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\DialogActions.js","./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFCharacterListItem.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFCharacterListItem.jsx","./components/HFRouteWrapper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx","./components/dialogs/HFOpenCharacterDialog.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\dialogs\\HFOpenCharacterDialog.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterPlayer.jsx":[function(require,module,exports){
 var React = require('react'),
     
     Reflux = require('reflux'),
@@ -325,12 +335,15 @@ module.exports = HeroForge;
 },{"./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFMenuBar.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBar.jsx","./stores/CharacterStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\CharacterStore.js","./stores/RouteStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\RouteStore.js","./stores/SoundStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\SoundStore.js","./stores/UserStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\UserStore.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react-router":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\Spellbook.jsx":[function(require,module,exports){
 var React = require('react'),
     
-    HFRouteWrapper = require('./components/HFRouteWrapper.jsx'),
-    HFPage = require('./components/HFPage.jsx'),
-    
     mui = require('material-ui'),
     DropDownMenu = mui.DropDownMenu,
     TextField = mui.TextField,
+    
+    HFRouteWrapper = require('./components/HFRouteWrapper.jsx'),
+    HFPage = require('./components/HFPage.jsx'),
+    HFSpellDialog = require('./components/dialogs/HFSpellDialog.jsx'),
+    
+    DialogActions = require('./actions/DialogActions.js'),
     
     spellData = require('./data/spells.js');
 
@@ -348,46 +361,51 @@ var Spellbook = React.createClass({displayName: "Spellbook",
   handleSearch: function() {
     this.setState({searchField: this.refs.searchText.getValue()});
   },
-  
   handleClassChange: function(e, selectedIndex, menuItem) {
     this.setState({className: menuItem.payload});
   },
-  
   handleLevelChange: function(e, selectedIndex, menuItem) {
     this.setState({spellLevel: menuItem.payload});
   },
   
+  selectSpell: function(spell) {
+    DialogActions.open({
+      component: HFSpellDialog,
+      props: spell
+    });
+  },
+  
   render: function() {
     var classes = [
-          { payload: '', text: 'On Class List (All)' },
-          { payload: 'bard', text: 'Bard' },
-          { payload: 'cleric', text: 'Cleric' },
-          { payload: 'druid', text: 'Druid' },
-          { payload: 'paladin', text: 'Paladin' },
-          { payload: 'ranger', text: 'Ranger' },
+          { payload: '',         text: 'On Class List (All)' },
+          { payload: 'bard',     text: 'Bard' },
+          { payload: 'cleric',   text: 'Cleric' },
+          { payload: 'druid',    text: 'Druid' },
+          { payload: 'paladin',  text: 'Paladin' },
+          { payload: 'ranger',   text: 'Ranger' },
           { payload: 'sorcerer', text: 'Sorcerer' },
-          { payload: 'warlock', text: 'Warlock' },
-          { payload: 'wizard', text: 'Wizard' }
+          { payload: 'warlock',  text: 'Warlock' },
+          { payload: 'wizard',   text: 'Wizard' }
         ],
         levels = [
           { payload: '', text: 'Spell Level (All)' },
-          { payload: 0, text: 'Cantrip' },
-          { payload: 1, text: '1' },
-          { payload: 2, text: '2' },
-          { payload: 3, text: '3' },
-          { payload: 4, text: '4' },
-          { payload: 5, text: '5' },
-          { payload: 6, text: '6' },
-          { payload: 7, text: '7' },
-          { payload: 8, text: '8' },
-          { payload: 9, text: '9' }
+          { payload: 0,  text: 'Cantrip' },
+          { payload: 1,  text: '1' },
+          { payload: 2,  text: '2' },
+          { payload: 3,  text: '3' },
+          { payload: 4,  text: '4' },
+          { payload: 5,  text: '5' },
+          { payload: 6,  text: '6' },
+          { payload: 7,  text: '7' },
+          { payload: 8,  text: '8' },
+          { payload: 9,  text: '9' }
         ],
-        spells = spellData.filter(function(spell) {
+        sortedSpells = spellData.sortBy('name');
+        spells = sortedSpells.filter(function(spell) {
           var isClass   = (this.state.className === "")   || (spell.class_list[this.state.className] === true),
               isLevel   = (this.state.spellLevel === "")  || (spell.level === this.state.spellLevel),
               hasSearch = (this.state.searchField === "") ||
                           (spell.name.toLowerCase().indexOf(this.state.searchField.toLowerCase()) !== -1);
-          
           return (isClass && isLevel && hasSearch);
         }, this);
     
@@ -410,8 +428,13 @@ var Spellbook = React.createClass({displayName: "Spellbook",
               React.createElement("span", {className: "level"}, "Level")
             ), 
             spells.map(function(spell) {
-              return React.createElement(SpellRow, React.__spread({},  spell, {key: spell.name}));
-            })
+              return (
+                React.createElement("li", {className: "spell-row item", key: spell.name, onTouchTap: this.selectSpell.bind(null, spell)}, 
+                  React.createElement("span", {className: "name"}, spell.name), 
+                  React.createElement("span", {className: "level"}, spell.level || "Cantrip")
+                )
+              );
+            }, this)
           )
           
         )
@@ -422,19 +445,7 @@ var Spellbook = React.createClass({displayName: "Spellbook",
 });
 
 module.exports = Spellbook;
-
-
-var SpellRow = React.createClass({displayName: "SpellRow",
-  render: function() {
-    return (
-      React.createElement("li", {className: "spell-row item"}, 
-        React.createElement("span", {className: "name"}, this.props.name), 
-        React.createElement("span", {className: "level"}, this.props.level || "Cantrip")
-      )
-    );
-  }
-});
-},{"./components/HFPage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFPage.jsx","./components/HFRouteWrapper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx","./data/spells.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\data\\spells.js","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js":[function(require,module,exports){
+},{"./actions/DialogActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\DialogActions.js","./components/HFPage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFPage.jsx","./components/HFRouteWrapper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx","./components/dialogs/HFSpellDialog.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\dialogs\\HFSpellDialog.jsx","./data/spells.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\data\\spells.js","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js":[function(require,module,exports){
 var Reflux = require('reflux');
 
 var CharacterActions = Reflux.createActions([
@@ -443,6 +454,15 @@ var CharacterActions = Reflux.createActions([
 ]);
 
 module.exports = CharacterActions;
+},{"reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\DialogActions.js":[function(require,module,exports){
+var Reflux = require('reflux');
+
+var DialogActions = Reflux.createActions([
+  'open',
+  'close'
+]);
+
+module.exports = DialogActions;
 },{"reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js":[function(require,module,exports){
 var Reflux = require('reflux');
 
@@ -556,7 +576,61 @@ var HFCharacterListItem = React.createClass({displayName: "HFCharacterListItem",
 });
 
 module.exports = HFCharacterListItem;
-},{"./HFAvatarImage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFAvatarImage.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBar.jsx":[function(require,module,exports){
+},{"./HFAvatarImage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFAvatarImage.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFDialogManager.jsx":[function(require,module,exports){
+var React = require('react'),
+    
+    Reflux = require('reflux'),
+    
+    DialogStore = require('../stores/DialogStore.js');
+
+
+var HFDialogManager = React.createClass({displayName: "HFDialogManager",
+  mixins: [Reflux.listenTo(DialogStore,"onDialogChange")],
+  
+  getInitialState: function() {
+    return {
+      dialog: {
+        component: null,
+        props: {}
+      },
+      isNew: false
+    };
+  },
+  
+  onDialogChange: function(action, dialog) {
+    switch (action) {
+      case "close": this.refs.dialog.dismiss(); break;
+      case "open":  this.setState({dialog:dialog, isNew:true}); break;
+    }
+  },
+  
+  componentDidUpdate: function() {
+    if (this.state.isNew) this.refs.dialog.show();
+  },
+  
+  onShow: function() {
+    this.setState({isNew:false});
+  },
+  
+  onDismiss: function() {},
+  
+  render: function() {
+    var Dialog = this.state.dialog.component;
+    return (
+      React.createElement("div", {id: "dialog-container"}, 
+        (Dialog !== null) ?
+          React.createElement(Dialog, React.__spread({ref: "dialog"},  this.state.dialog.props, {onShow: this.onShow, onDismiss: this.onDismiss}))
+          :
+          []
+        
+      )
+    );
+  }
+
+});
+
+module.exports = HFDialogManager;
+},{"../stores/DialogStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\DialogStore.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBar.jsx":[function(require,module,exports){
 var React = require('react'),
 
     Navigation = require('react-router').Navigation,
@@ -658,6 +732,7 @@ module.exports = HFPage;
 },{"material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx":[function(require,module,exports){
 var React = require('react'),
     
+    HFDialogManager = require('./HFDialogManager.jsx'),
     HFMenuBar = require('./HFMenuBar.jsx');
 
 
@@ -672,7 +747,9 @@ var HFRouteWrapper = React.createClass({displayName: "HFRouteWrapper",
           React.createElement("div", {className: this.props.className}, 
             this.props.children
           )
-        )
+        ), 
+        
+        React.createElement(HFDialogManager, null)
       )
     );
   }
@@ -680,7 +757,101 @@ var HFRouteWrapper = React.createClass({displayName: "HFRouteWrapper",
 });
 
 module.exports = HFRouteWrapper;
-},{"./HFMenuBar.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBar.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\data\\spells.js":[function(require,module,exports){
+},{"./HFDialogManager.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFDialogManager.jsx","./HFMenuBar.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBar.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\dialogs\\HFDialogMixin.js":[function(require,module,exports){
+module.exports = {
+  
+  show: function() {
+    this.refs.dialog.show();
+  },
+  
+  dismiss: function() {
+    this.refs.dialog.dismiss();
+  },
+  
+};
+
+},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\dialogs\\HFOpenCharacterDialog.jsx":[function(require,module,exports){
+var React = require('react'),
+    
+    mui = require('material-ui'),
+    Dialog = mui.Dialog,
+    
+    HFDialogMixin = require('./HFDialogMixin.js');
+
+var HFOpenCharacterDialog = React.createClass({displayName: "HFOpenCharacterDialog",
+  mixins: [HFDialogMixin],
+  
+  render: function() {
+    var dialogActions = [
+      { text: 'OK' }
+    ];
+    return (
+      React.createElement(Dialog, React.__spread({ref: "dialog"},  this.props, {title: "New Character", actions: dialogActions}), 
+        "This is a test of a dialog."
+      )
+    );
+  }
+
+});
+
+module.exports = HFOpenCharacterDialog;
+},{"./HFDialogMixin.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\dialogs\\HFDialogMixin.js","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\dialogs\\HFSpellDialog.jsx":[function(require,module,exports){
+var React = require('react'),
+    
+    mui = require('material-ui'),
+    Dialog = mui.Dialog,
+    
+    HFDialogMixin = require('./HFDialogMixin.js');
+
+var HFSpellDialog = React.createClass({displayName: "HFSpellDialog",
+  mixins: [HFDialogMixin],
+  
+  render: function() {
+    var spell = this.props,
+        type = (this.props.level) ?
+          '{l}-level {s}{r}'.assign({
+              l: spell.level.ordinalize(),
+              s: spell.school.toLowerCase(),
+              r: ((spell.ritual) ? ' (ritual)' : '')
+            })
+          :
+          '{1} cantrip'.assign(spell.school);
+
+    var dialogActions = [
+      { text: 'OK' }
+    ];
+    return (
+      React.createElement(Dialog, React.__spread({className: "dialog spell", ref: "dialog"},  this.props, {title: spell.name, actions: dialogActions}), 
+        React.createElement("p", {class: "type"}, type), 
+        React.createElement("ul", {className: "details"}, 
+          React.createElement("li", null, 
+            React.createElement("span", {className: "name"}, "Casting Time: "), 
+            React.createElement("span", null, spell.casting_time)
+          ), 
+          React.createElement("li", null, 
+            React.createElement("span", {className: "name"}, "Range: "), 
+            React.createElement("span", null, spell.range)
+          ), 
+          React.createElement("li", null, 
+            React.createElement("span", {className: "name"}, "Components: "), 
+            React.createElement("span", null, spell.components.replace(/,/g, ', '))
+          ), 
+          React.createElement("li", null, 
+            React.createElement("span", {className: "name"}, "Duration: "), 
+            React.createElement("span", null, spell.casting_time)
+          )
+        ), 
+        React.createElement("p", {className: "description"}, 
+          spell.description
+        )
+      )
+    );
+  }
+
+});
+
+module.exports = HFSpellDialog;
+},{"./HFDialogMixin.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\dialogs\\HFDialogMixin.js","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\data\\spells.js":[function(require,module,exports){
 module.exports = [
   {
     "name":"Acid Splash",
@@ -8977,7 +9148,7 @@ module.exports = [
     "concentration":true,
     "ritual":false,
     "duration":"8 hours",
-    "range":"5 miles",
+    "range":"Self (5 mile radius)",
     "components":"V,S,M",
     "scales":false,
     "description":"Take control of the weather, changing precipitation, temperature and wind."
@@ -9732,7 +9903,39 @@ var CharacterStore = Reflux.createStore({
 
 
 module.exports = CharacterStore;
-},{"../actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","../actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\RouteStore.js":[function(require,module,exports){
+},{"../actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","../actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\DialogStore.js":[function(require,module,exports){
+var Reflux = require('reflux'),
+    // sugar = require('sugar'),
+    DialogActions = require('../actions/DialogActions.js');
+
+var _data = null;
+
+var DialogStore = Reflux.createStore({
+  
+  listenables: DialogActions,  //maps actions to handlers bellow
+  
+  onOpen: function(dialog) {
+    this.trigger('open', dialog);
+  },
+  
+  onClose: function() {
+    this.trigger('close');
+  },
+  
+  // onMakeSelection : function(data) {
+  //   _data = data;
+  //   this.trigger('selection', _data);
+  // },
+  
+  // getData: function() {
+  //   return _data;
+  // },
+  
+});
+
+
+module.exports = DialogStore;
+},{"../actions/DialogActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\DialogActions.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\RouteStore.js":[function(require,module,exports){
 var Reflux = require('reflux'),
     // sugar = require('sugar'),
     RouteActions = require('../actions/RouteActions.js');
