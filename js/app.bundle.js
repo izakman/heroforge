@@ -581,7 +581,9 @@ var React = require('react'),
     
     Reflux = require('reflux'),
     
-    DialogStore = require('../stores/DialogStore.js');
+    DialogStore = require('../stores/DialogStore.js'),
+    
+    SoundActions = require('../actions/SoundActions.js');
 
 
 var HFDialogManager = React.createClass({displayName: "HFDialogManager",
@@ -610,6 +612,7 @@ var HFDialogManager = React.createClass({displayName: "HFDialogManager",
   
   onShow: function() {
     this.setState({isNew:false});
+    SoundActions.playPaper();
   },
   
   onDismiss: function() {},
@@ -630,7 +633,7 @@ var HFDialogManager = React.createClass({displayName: "HFDialogManager",
 });
 
 module.exports = HFDialogManager;
-},{"../stores/DialogStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\DialogStore.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBar.jsx":[function(require,module,exports){
+},{"../actions/SoundActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\SoundActions.js","../stores/DialogStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\DialogStore.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBar.jsx":[function(require,module,exports){
 var React = require('react'),
 
     Navigation = require('react-router').Navigation,
