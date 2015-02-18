@@ -73,3 +73,36 @@
   }
   
 }
+
+
+#dialog-container .dialog {
+  .mui-dialog-window-contents {
+    width: 90%;
+    max-width: 400px;
+    .mui-dialog-content {
+      padding-top: 10px;
+    }
+  }
+  &.mui-is-shown {
+    .mui-dialog-window-contents {
+      transform: translate3d(0, 10%, 0);
+    }
+  }
+  
+  .type {
+    color: fade(@body-text-color, 70%);
+    font-size: 20px;
+    font-style: italic;
+    text-align: center;
+  }
+  
+  .details {
+    list-style: none;
+    padding-top: 6px;
+    margin-bottom: 14px;
+    .name {
+      font-weight: bold;
+    }
+  }
+  
+}
