@@ -2,7 +2,9 @@ var React = require('react'),
     
     Reflux = require('reflux'),
     
-    DialogStore = require('../stores/DialogStore.js');
+    DialogStore = require('../stores/DialogStore.js'),
+    
+    SoundActions = require('../actions/SoundActions.js');
 
 
 var HFDialogManager = React.createClass({
@@ -31,6 +33,7 @@ var HFDialogManager = React.createClass({
   
   onShow: function() {
     this.setState({isNew:false});
+    SoundActions.playPaper();
   },
   
   onDismiss: function() {},
