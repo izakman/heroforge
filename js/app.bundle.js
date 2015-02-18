@@ -1998,7 +1998,7 @@ module.exports = [
     "concentration":false,
     "ritual":false,
     "duration":"1 round",
-    "range":"15 feet",
+    "range":"Self (15-foot cone)",
     "components":"V,S,M",
     "scales":true,
     "description":"AoE blind debuff"

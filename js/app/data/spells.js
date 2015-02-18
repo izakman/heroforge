@@ -1144,7 +1144,7 @@ module.exports = [
     "concentration":false,
     "ritual":false,
     "duration":"1 round",
-    "range":"15 feet",
+    "range":"Self (15-foot cone)",
     "components":"V,S,M",
     "scales":true,
     "description":"AoE blind debuff"
@@ -8294,7 +8294,7 @@ module.exports = [
     "concentration":true,
     "ritual":false,
     "duration":"8 hours",
-    "range":"5 miles",
+    "range":"Self (5 mile radius)",
     "components":"V,S,M",
     "scales":false,
     "description":"Take control of the weather, changing precipitation, temperature and wind."
