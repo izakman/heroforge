@@ -1,0 +1,108 @@
+.spellbook {
+  .page {
+    max-width: 500px;
+  }
+  .menubar {
+    .left-group, .right-group {
+      display: none;
+    }
+  }
+  .filters {
+    text-align: center;
+    .search {
+      width: 250px;
+    }
+    .mui-drop-down-menu {
+      text-align: left;
+    }
+    .mui-menu-control-underline,
+    .mui-text-field-underline {
+      border-color: @primary-3-color;
+      opacity: 0.2;
+    }
+    .mui-menu-control-bg {
+      background-color: fade(@primary-2-color, 15%);
+    }
+  }
+  
+  .spell-list {
+    list-style: none;
+    clear: both;
+    width: 100%;
+    max-width: 360px;
+    margin: 30px auto;
+    display: table;
+    
+    .spell-row {
+      display: table-row;
+      margin: 5px 0;
+      clear: both;
+      transition: all 450ms cubic-bezier(.23, 1, .32, 1) 0ms;
+      border-radius: 2px;
+      background-color: fade(@primary-2-color, 0%);
+      &.item:hover {
+        background-color: fade(@primary-2-color, 15%);
+        cursor: pointer;
+      }
+      span {
+        display: table-cell;
+        vertical-align: middle;
+        padding: 7px 10px;
+        &.name {
+          
+        }
+        &.level {
+          text-align: center;
+          opacity: 0.6;
+          width: 85px;
+          // float: right;
+        }
+      }
+      &.header {
+        span {
+          &.level {
+            font-weight: bold;
+            font-size: 14px;
+            color: @primary-3-color;
+            opacity: 1;
+          }
+        }
+      }
+    }
+    
+  }
+  
+}
+
+
+#dialog-container .dialog {
+  .mui-dialog-window-contents {
+    width: 90%;
+    max-width: 400px;
+    .mui-dialog-content {
+      padding-top: 10px;
+    }
+  }
+  &.mui-is-shown {
+    .mui-dialog-window-contents {
+      transform: translate3d(0, 10%, 0);
+    }
+  }
+  
+  .type {
+    color: fade(@body-text-color, 70%);
+    font-size: 20px;
+    font-style: italic;
+    text-align: center;
+  }
+  
+  .details {
+    list-style: none;
+    padding-top: 6px;
+    margin-bottom: 14px;
+    .name {
+      font-weight: bold;
+    }
+  }
+  
+}

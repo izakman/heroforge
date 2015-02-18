@@ -1,1567 +1,4 @@
-(function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({"C:\\Users\\Isaac\\AppData\\Roaming\\npm\\node_modules\\watchify\\node_modules\\browserify\\node_modules\\buffer\\index.js":[function(require,module,exports){
-/*!
- * The buffer module from node.js, for the browser.
- *
- * @author   Feross Aboukhadijeh <feross@feross.org> <http://feross.org>
- * @license  MIT
- */
-
-var base64 = require('base64-js')
-var ieee754 = require('ieee754')
-var isArray = require('is-array')
-
-exports.Buffer = Buffer
-exports.SlowBuffer = SlowBuffer
-exports.INSPECT_MAX_BYTES = 50
-Buffer.poolSize = 8192 // not used by this implementation
-
-var kMaxLength = 0x3fffffff
-var rootParent = {}
-
-/**
- * If `Buffer.TYPED_ARRAY_SUPPORT`:
- *   === true    Use Uint8Array implementation (fastest)
- *   === false   Use Object implementation (most compatible, even IE6)
- *
- * Browsers that support typed arrays are IE 10+, Firefox 4+, Chrome 7+, Safari 5.1+,
- * Opera 11.6+, iOS 4.2+.
- *
- * Note:
- *
- * - Implementation must support adding new properties to `Uint8Array` instances.
- *   Firefox 4-29 lacked support, fixed in Firefox 30+.
- *   See: https://bugzilla.mozilla.org/show_bug.cgi?id=695438.
- *
- *  - Chrome 9-10 is missing the `TypedArray.prototype.subarray` function.
- *
- *  - IE10 has a broken `TypedArray.prototype.subarray` function which returns arrays of
- *    incorrect length in some situations.
- *
- * We detect these buggy browsers and set `Buffer.TYPED_ARRAY_SUPPORT` to `false` so they will
- * get the Object implementation, which is slower but will work correctly.
- */
-Buffer.TYPED_ARRAY_SUPPORT = (function () {
-  try {
-    var buf = new ArrayBuffer(0)
-    var arr = new Uint8Array(buf)
-    arr.foo = function () { return 42 }
-    return 42 === arr.foo() && // typed array instances can be augmented
-        typeof arr.subarray === 'function' && // chrome 9-10 lack `subarray`
-        new Uint8Array(1).subarray(1, 1).byteLength === 0 // ie10 has broken `subarray`
-  } catch (e) {
-    return false
-  }
-})()
-
-/**
- * Class: Buffer
- * =============
- *
- * The Buffer constructor returns instances of `Uint8Array` that are augmented
- * with function properties for all the node `Buffer` API functions. We use
- * `Uint8Array` so that square bracket notation works as expected -- it returns
- * a single octet.
- *
- * By augmenting the instances, we can avoid modifying the `Uint8Array`
- * prototype.
- */
-function Buffer (subject, encoding, noZero) {
-  if (!(this instanceof Buffer))
-    return new Buffer(subject, encoding, noZero)
-
-  var type = typeof subject
-
-  // Find the length
-  var length
-  if (type === 'number')
-    length = subject > 0 ? subject >>> 0 : 0
-  else if (type === 'string') {
-    length = Buffer.byteLength(subject, encoding)
-  } else if (type === 'object' && subject !== null) { // assume object is array-like
-    if (subject.type === 'Buffer' && isArray(subject.data))
-      subject = subject.data
-    length = +subject.length > 0 ? Math.floor(+subject.length) : 0
-  } else
-    throw new TypeError('must start with number, buffer, array or string')
-
-  if (length > kMaxLength)
-    throw new RangeError('Attempt to allocate Buffer larger than maximum ' +
-      'size: 0x' + kMaxLength.toString(16) + ' bytes')
-
-  var buf
-  if (Buffer.TYPED_ARRAY_SUPPORT) {
-    // Preferred: Return an augmented `Uint8Array` instance for best performance
-    buf = Buffer._augment(new Uint8Array(length))
-  } else {
-    // Fallback: Return THIS instance of Buffer (created by `new`)
-    buf = this
-    buf.length = length
-    buf._isBuffer = true
-  }
-
-  var i
-  if (Buffer.TYPED_ARRAY_SUPPORT && typeof subject.byteLength === 'number') {
-    // Speed optimization -- use set if we're copying from a typed array
-    buf._set(subject)
-  } else if (isArrayish(subject)) {
-    // Treat array-ish objects as a byte array
-    if (Buffer.isBuffer(subject)) {
-      for (i = 0; i < length; i++)
-        buf[i] = subject.readUInt8(i)
-    } else {
-      for (i = 0; i < length; i++)
-        buf[i] = ((subject[i] % 256) + 256) % 256
-    }
-  } else if (type === 'string') {
-    buf.write(subject, 0, encoding)
-  } else if (type === 'number' && !Buffer.TYPED_ARRAY_SUPPORT && !noZero) {
-    for (i = 0; i < length; i++) {
-      buf[i] = 0
-    }
-  }
-
-  if (length > 0 && length <= Buffer.poolSize)
-    buf.parent = rootParent
-
-  return buf
-}
-
-function SlowBuffer(subject, encoding, noZero) {
-  if (!(this instanceof SlowBuffer))
-    return new SlowBuffer(subject, encoding, noZero)
-
-  var buf = new Buffer(subject, encoding, noZero)
-  delete buf.parent
-  return buf
-}
-
-Buffer.isBuffer = function (b) {
-  return !!(b != null && b._isBuffer)
-}
-
-Buffer.compare = function (a, b) {
-  if (!Buffer.isBuffer(a) || !Buffer.isBuffer(b))
-    throw new TypeError('Arguments must be Buffers')
-
-  var x = a.length
-  var y = b.length
-  for (var i = 0, len = Math.min(x, y); i < len && a[i] === b[i]; i++) {}
-  if (i !== len) {
-    x = a[i]
-    y = b[i]
-  }
-  if (x < y) return -1
-  if (y < x) return 1
-  return 0
-}
-
-Buffer.isEncoding = function (encoding) {
-  switch (String(encoding).toLowerCase()) {
-    case 'hex':
-    case 'utf8':
-    case 'utf-8':
-    case 'ascii':
-    case 'binary':
-    case 'base64':
-    case 'raw':
-    case 'ucs2':
-    case 'ucs-2':
-    case 'utf16le':
-    case 'utf-16le':
-      return true
-    default:
-      return false
-  }
-}
-
-Buffer.concat = function (list, totalLength) {
-  if (!isArray(list)) throw new TypeError('Usage: Buffer.concat(list[, length])')
-
-  if (list.length === 0) {
-    return new Buffer(0)
-  } else if (list.length === 1) {
-    return list[0]
-  }
-
-  var i
-  if (totalLength === undefined) {
-    totalLength = 0
-    for (i = 0; i < list.length; i++) {
-      totalLength += list[i].length
-    }
-  }
-
-  var buf = new Buffer(totalLength)
-  var pos = 0
-  for (i = 0; i < list.length; i++) {
-    var item = list[i]
-    item.copy(buf, pos)
-    pos += item.length
-  }
-  return buf
-}
-
-Buffer.byteLength = function (str, encoding) {
-  var ret
-  str = str + ''
-  switch (encoding || 'utf8') {
-    case 'ascii':
-    case 'binary':
-    case 'raw':
-      ret = str.length
-      break
-    case 'ucs2':
-    case 'ucs-2':
-    case 'utf16le':
-    case 'utf-16le':
-      ret = str.length * 2
-      break
-    case 'hex':
-      ret = str.length >>> 1
-      break
-    case 'utf8':
-    case 'utf-8':
-      ret = utf8ToBytes(str).length
-      break
-    case 'base64':
-      ret = base64ToBytes(str).length
-      break
-    default:
-      ret = str.length
-  }
-  return ret
-}
-
-// pre-set for values that may exist in the future
-Buffer.prototype.length = undefined
-Buffer.prototype.parent = undefined
-
-// toString(encoding, start=0, end=buffer.length)
-Buffer.prototype.toString = function (encoding, start, end) {
-  var loweredCase = false
-
-  start = start >>> 0
-  end = end === undefined || end === Infinity ? this.length : end >>> 0
-
-  if (!encoding) encoding = 'utf8'
-  if (start < 0) start = 0
-  if (end > this.length) end = this.length
-  if (end <= start) return ''
-
-  while (true) {
-    switch (encoding) {
-      case 'hex':
-        return hexSlice(this, start, end)
-
-      case 'utf8':
-      case 'utf-8':
-        return utf8Slice(this, start, end)
-
-      case 'ascii':
-        return asciiSlice(this, start, end)
-
-      case 'binary':
-        return binarySlice(this, start, end)
-
-      case 'base64':
-        return base64Slice(this, start, end)
-
-      case 'ucs2':
-      case 'ucs-2':
-      case 'utf16le':
-      case 'utf-16le':
-        return utf16leSlice(this, start, end)
-
-      default:
-        if (loweredCase)
-          throw new TypeError('Unknown encoding: ' + encoding)
-        encoding = (encoding + '').toLowerCase()
-        loweredCase = true
-    }
-  }
-}
-
-Buffer.prototype.equals = function (b) {
-  if (!Buffer.isBuffer(b)) throw new TypeError('Argument must be a Buffer')
-  return Buffer.compare(this, b) === 0
-}
-
-Buffer.prototype.inspect = function () {
-  var str = ''
-  var max = exports.INSPECT_MAX_BYTES
-  if (this.length > 0) {
-    str = this.toString('hex', 0, max).match(/.{2}/g).join(' ')
-    if (this.length > max)
-      str += ' ... '
-  }
-  return '<Buffer ' + str + '>'
-}
-
-Buffer.prototype.compare = function (b) {
-  if (!Buffer.isBuffer(b)) throw new TypeError('Argument must be a Buffer')
-  return Buffer.compare(this, b)
-}
-
-// `get` will be removed in Node 0.13+
-Buffer.prototype.get = function (offset) {
-  console.log('.get() is deprecated. Access using array indexes instead.')
-  return this.readUInt8(offset)
-}
-
-// `set` will be removed in Node 0.13+
-Buffer.prototype.set = function (v, offset) {
-  console.log('.set() is deprecated. Access using array indexes instead.')
-  return this.writeUInt8(v, offset)
-}
-
-function hexWrite (buf, string, offset, length) {
-  offset = Number(offset) || 0
-  var remaining = buf.length - offset
-  if (!length) {
-    length = remaining
-  } else {
-    length = Number(length)
-    if (length > remaining) {
-      length = remaining
-    }
-  }
-
-  // must be an even number of digits
-  var strLen = string.length
-  if (strLen % 2 !== 0) throw new Error('Invalid hex string')
-
-  if (length > strLen / 2) {
-    length = strLen / 2
-  }
-  for (var i = 0; i < length; i++) {
-    var byte = parseInt(string.substr(i * 2, 2), 16)
-    if (isNaN(byte)) throw new Error('Invalid hex string')
-    buf[offset + i] = byte
-  }
-  return i
-}
-
-function utf8Write (buf, string, offset, length) {
-  var charsWritten = blitBuffer(utf8ToBytes(string, buf.length - offset), buf, offset, length)
-  return charsWritten
-}
-
-function asciiWrite (buf, string, offset, length) {
-  var charsWritten = blitBuffer(asciiToBytes(string), buf, offset, length)
-  return charsWritten
-}
-
-function binaryWrite (buf, string, offset, length) {
-  return asciiWrite(buf, string, offset, length)
-}
-
-function base64Write (buf, string, offset, length) {
-  var charsWritten = blitBuffer(base64ToBytes(string), buf, offset, length)
-  return charsWritten
-}
-
-function utf16leWrite (buf, string, offset, length) {
-  var charsWritten = blitBuffer(utf16leToBytes(string, buf.length - offset), buf, offset, length, 2)
-  return charsWritten
-}
-
-Buffer.prototype.write = function (string, offset, length, encoding) {
-  // Support both (string, offset, length, encoding)
-  // and the legacy (string, encoding, offset, length)
-  if (isFinite(offset)) {
-    if (!isFinite(length)) {
-      encoding = length
-      length = undefined
-    }
-  } else {  // legacy
-    var swap = encoding
-    encoding = offset
-    offset = length
-    length = swap
-  }
-
-  offset = Number(offset) || 0
-
-  if (length < 0 || offset < 0 || offset > this.length)
-    throw new RangeError('attempt to write outside buffer bounds');
-
-  var remaining = this.length - offset
-  if (!length) {
-    length = remaining
-  } else {
-    length = Number(length)
-    if (length > remaining) {
-      length = remaining
-    }
-  }
-  encoding = String(encoding || 'utf8').toLowerCase()
-
-  var ret
-  switch (encoding) {
-    case 'hex':
-      ret = hexWrite(this, string, offset, length)
-      break
-    case 'utf8':
-    case 'utf-8':
-      ret = utf8Write(this, string, offset, length)
-      break
-    case 'ascii':
-      ret = asciiWrite(this, string, offset, length)
-      break
-    case 'binary':
-      ret = binaryWrite(this, string, offset, length)
-      break
-    case 'base64':
-      ret = base64Write(this, string, offset, length)
-      break
-    case 'ucs2':
-    case 'ucs-2':
-    case 'utf16le':
-    case 'utf-16le':
-      ret = utf16leWrite(this, string, offset, length)
-      break
-    default:
-      throw new TypeError('Unknown encoding: ' + encoding)
-  }
-  return ret
-}
-
-Buffer.prototype.toJSON = function () {
-  return {
-    type: 'Buffer',
-    data: Array.prototype.slice.call(this._arr || this, 0)
-  }
-}
-
-function base64Slice (buf, start, end) {
-  if (start === 0 && end === buf.length) {
-    return base64.fromByteArray(buf)
-  } else {
-    return base64.fromByteArray(buf.slice(start, end))
-  }
-}
-
-function utf8Slice (buf, start, end) {
-  var res = ''
-  var tmp = ''
-  end = Math.min(buf.length, end)
-
-  for (var i = start; i < end; i++) {
-    if (buf[i] <= 0x7F) {
-      res += decodeUtf8Char(tmp) + String.fromCharCode(buf[i])
-      tmp = ''
-    } else {
-      tmp += '%' + buf[i].toString(16)
-    }
-  }
-
-  return res + decodeUtf8Char(tmp)
-}
-
-function asciiSlice (buf, start, end) {
-  var ret = ''
-  end = Math.min(buf.length, end)
-
-  for (var i = start; i < end; i++) {
-    ret += String.fromCharCode(buf[i] & 0x7F)
-  }
-  return ret
-}
-
-function binarySlice (buf, start, end) {
-  var ret = ''
-  end = Math.min(buf.length, end)
-
-  for (var i = start; i < end; i++) {
-    ret += String.fromCharCode(buf[i])
-  }
-  return ret
-}
-
-function hexSlice (buf, start, end) {
-  var len = buf.length
-
-  if (!start || start < 0) start = 0
-  if (!end || end < 0 || end > len) end = len
-
-  var out = ''
-  for (var i = start; i < end; i++) {
-    out += toHex(buf[i])
-  }
-  return out
-}
-
-function utf16leSlice (buf, start, end) {
-  var bytes = buf.slice(start, end)
-  var res = ''
-  for (var i = 0; i < bytes.length; i += 2) {
-    res += String.fromCharCode(bytes[i] + bytes[i + 1] * 256)
-  }
-  return res
-}
-
-Buffer.prototype.slice = function (start, end) {
-  var len = this.length
-  start = ~~start
-  end = end === undefined ? len : ~~end
-
-  if (start < 0) {
-    start += len;
-    if (start < 0)
-      start = 0
-  } else if (start > len) {
-    start = len
-  }
-
-  if (end < 0) {
-    end += len
-    if (end < 0)
-      end = 0
-  } else if (end > len) {
-    end = len
-  }
-
-  if (end < start)
-    end = start
-
-  var newBuf
-  if (Buffer.TYPED_ARRAY_SUPPORT) {
-    newBuf = Buffer._augment(this.subarray(start, end))
-  } else {
-    var sliceLen = end - start
-    newBuf = new Buffer(sliceLen, undefined, true)
-    for (var i = 0; i < sliceLen; i++) {
-      newBuf[i] = this[i + start]
-    }
-  }
-
-  if (newBuf.length)
-    newBuf.parent = this.parent || this
-
-  return newBuf
-}
-
-/*
- * Need to make sure that buffer isn't trying to write out of bounds.
- */
-function checkOffset (offset, ext, length) {
-  if ((offset % 1) !== 0 || offset < 0)
-    throw new RangeError('offset is not uint')
-  if (offset + ext > length)
-    throw new RangeError('Trying to access beyond buffer length')
-}
-
-Buffer.prototype.readUIntLE = function (offset, byteLength, noAssert) {
-  offset = offset >>> 0
-  byteLength = byteLength >>> 0
-  if (!noAssert)
-    checkOffset(offset, byteLength, this.length)
-
-  var val = this[offset]
-  var mul = 1
-  var i = 0
-  while (++i < byteLength && (mul *= 0x100))
-    val += this[offset + i] * mul
-
-  return val
-}
-
-Buffer.prototype.readUIntBE = function (offset, byteLength, noAssert) {
-  offset = offset >>> 0
-  byteLength = byteLength >>> 0
-  if (!noAssert)
-    checkOffset(offset, byteLength, this.length)
-
-  var val = this[offset + --byteLength]
-  var mul = 1
-  while (byteLength > 0 && (mul *= 0x100))
-    val += this[offset + --byteLength] * mul;
-
-  return val
-}
-
-Buffer.prototype.readUInt8 = function (offset, noAssert) {
-  if (!noAssert)
-    checkOffset(offset, 1, this.length)
-  return this[offset]
-}
-
-Buffer.prototype.readUInt16LE = function (offset, noAssert) {
-  if (!noAssert)
-    checkOffset(offset, 2, this.length)
-  return this[offset] | (this[offset + 1] << 8)
-}
-
-Buffer.prototype.readUInt16BE = function (offset, noAssert) {
-  if (!noAssert)
-    checkOffset(offset, 2, this.length)
-  return (this[offset] << 8) | this[offset + 1]
-}
-
-Buffer.prototype.readUInt32LE = function (offset, noAssert) {
-  if (!noAssert)
-    checkOffset(offset, 4, this.length)
-
-  return ((this[offset]) |
-      (this[offset + 1] << 8) |
-      (this[offset + 2] << 16)) +
-      (this[offset + 3] * 0x1000000)
-}
-
-Buffer.prototype.readUInt32BE = function (offset, noAssert) {
-  if (!noAssert)
-    checkOffset(offset, 4, this.length)
-
-  return (this[offset] * 0x1000000) +
-      ((this[offset + 1] << 16) |
-      (this[offset + 2] << 8) |
-      this[offset + 3])
-}
-
-Buffer.prototype.readIntLE = function (offset, byteLength, noAssert) {
-  offset = offset >>> 0
-  byteLength = byteLength >>> 0
-  if (!noAssert)
-    checkOffset(offset, byteLength, this.length)
-
-  var val = this[offset]
-  var mul = 1
-  var i = 0
-  while (++i < byteLength && (mul *= 0x100))
-    val += this[offset + i] * mul
-  mul *= 0x80
-
-  if (val >= mul)
-    val -= Math.pow(2, 8 * byteLength)
-
-  return val
-}
-
-Buffer.prototype.readIntBE = function (offset, byteLength, noAssert) {
-  offset = offset >>> 0
-  byteLength = byteLength >>> 0
-  if (!noAssert)
-    checkOffset(offset, byteLength, this.length)
-
-  var i = byteLength
-  var mul = 1
-  var val = this[offset + --i]
-  while (i > 0 && (mul *= 0x100))
-    val += this[offset + --i] * mul
-  mul *= 0x80
-
-  if (val >= mul)
-    val -= Math.pow(2, 8 * byteLength)
-
-  return val
-}
-
-Buffer.prototype.readInt8 = function (offset, noAssert) {
-  if (!noAssert)
-    checkOffset(offset, 1, this.length)
-  if (!(this[offset] & 0x80))
-    return (this[offset])
-  return ((0xff - this[offset] + 1) * -1)
-}
-
-Buffer.prototype.readInt16LE = function (offset, noAssert) {
-  if (!noAssert)
-    checkOffset(offset, 2, this.length)
-  var val = this[offset] | (this[offset + 1] << 8)
-  return (val & 0x8000) ? val | 0xFFFF0000 : val
-}
-
-Buffer.prototype.readInt16BE = function (offset, noAssert) {
-  if (!noAssert)
-    checkOffset(offset, 2, this.length)
-  var val = this[offset + 1] | (this[offset] << 8)
-  return (val & 0x8000) ? val | 0xFFFF0000 : val
-}
-
-Buffer.prototype.readInt32LE = function (offset, noAssert) {
-  if (!noAssert)
-    checkOffset(offset, 4, this.length)
-
-  return (this[offset]) |
-      (this[offset + 1] << 8) |
-      (this[offset + 2] << 16) |
-      (this[offset + 3] << 24)
-}
-
-Buffer.prototype.readInt32BE = function (offset, noAssert) {
-  if (!noAssert)
-    checkOffset(offset, 4, this.length)
-
-  return (this[offset] << 24) |
-      (this[offset + 1] << 16) |
-      (this[offset + 2] << 8) |
-      (this[offset + 3])
-}
-
-Buffer.prototype.readFloatLE = function (offset, noAssert) {
-  if (!noAssert)
-    checkOffset(offset, 4, this.length)
-  return ieee754.read(this, offset, true, 23, 4)
-}
-
-Buffer.prototype.readFloatBE = function (offset, noAssert) {
-  if (!noAssert)
-    checkOffset(offset, 4, this.length)
-  return ieee754.read(this, offset, false, 23, 4)
-}
-
-Buffer.prototype.readDoubleLE = function (offset, noAssert) {
-  if (!noAssert)
-    checkOffset(offset, 8, this.length)
-  return ieee754.read(this, offset, true, 52, 8)
-}
-
-Buffer.prototype.readDoubleBE = function (offset, noAssert) {
-  if (!noAssert)
-    checkOffset(offset, 8, this.length)
-  return ieee754.read(this, offset, false, 52, 8)
-}
-
-function checkInt (buf, value, offset, ext, max, min) {
-  if (!Buffer.isBuffer(buf)) throw new TypeError('buffer must be a Buffer instance')
-  if (value > max || value < min) throw new RangeError('value is out of bounds')
-  if (offset + ext > buf.length) throw new RangeError('index out of range')
-}
-
-Buffer.prototype.writeUIntLE = function (value, offset, byteLength, noAssert) {
-  value = +value
-  offset = offset >>> 0
-  byteLength = byteLength >>> 0
-  if (!noAssert)
-    checkInt(this, value, offset, byteLength, Math.pow(2, 8 * byteLength), 0)
-
-  var mul = 1
-  var i = 0
-  this[offset] = value & 0xFF
-  while (++i < byteLength && (mul *= 0x100))
-    this[offset + i] = (value / mul) >>> 0 & 0xFF
-
-  return offset + byteLength
-}
-
-Buffer.prototype.writeUIntBE = function (value, offset, byteLength, noAssert) {
-  value = +value
-  offset = offset >>> 0
-  byteLength = byteLength >>> 0
-  if (!noAssert)
-    checkInt(this, value, offset, byteLength, Math.pow(2, 8 * byteLength), 0)
-
-  var i = byteLength - 1
-  var mul = 1
-  this[offset + i] = value & 0xFF
-  while (--i >= 0 && (mul *= 0x100))
-    this[offset + i] = (value / mul) >>> 0 & 0xFF
-
-  return offset + byteLength
-}
-
-Buffer.prototype.writeUInt8 = function (value, offset, noAssert) {
-  value = +value
-  offset = offset >>> 0
-  if (!noAssert)
-    checkInt(this, value, offset, 1, 0xff, 0)
-  if (!Buffer.TYPED_ARRAY_SUPPORT) value = Math.floor(value)
-  this[offset] = value
-  return offset + 1
-}
-
-function objectWriteUInt16 (buf, value, offset, littleEndian) {
-  if (value < 0) value = 0xffff + value + 1
-  for (var i = 0, j = Math.min(buf.length - offset, 2); i < j; i++) {
-    buf[offset + i] = (value & (0xff << (8 * (littleEndian ? i : 1 - i)))) >>>
-      (littleEndian ? i : 1 - i) * 8
-  }
-}
-
-Buffer.prototype.writeUInt16LE = function (value, offset, noAssert) {
-  value = +value
-  offset = offset >>> 0
-  if (!noAssert)
-    checkInt(this, value, offset, 2, 0xffff, 0)
-  if (Buffer.TYPED_ARRAY_SUPPORT) {
-    this[offset] = value
-    this[offset + 1] = (value >>> 8)
-  } else objectWriteUInt16(this, value, offset, true)
-  return offset + 2
-}
-
-Buffer.prototype.writeUInt16BE = function (value, offset, noAssert) {
-  value = +value
-  offset = offset >>> 0
-  if (!noAssert)
-    checkInt(this, value, offset, 2, 0xffff, 0)
-  if (Buffer.TYPED_ARRAY_SUPPORT) {
-    this[offset] = (value >>> 8)
-    this[offset + 1] = value
-  } else objectWriteUInt16(this, value, offset, false)
-  return offset + 2
-}
-
-function objectWriteUInt32 (buf, value, offset, littleEndian) {
-  if (value < 0) value = 0xffffffff + value + 1
-  for (var i = 0, j = Math.min(buf.length - offset, 4); i < j; i++) {
-    buf[offset + i] = (value >>> (littleEndian ? i : 3 - i) * 8) & 0xff
-  }
-}
-
-Buffer.prototype.writeUInt32LE = function (value, offset, noAssert) {
-  value = +value
-  offset = offset >>> 0
-  if (!noAssert)
-    checkInt(this, value, offset, 4, 0xffffffff, 0)
-  if (Buffer.TYPED_ARRAY_SUPPORT) {
-    this[offset + 3] = (value >>> 24)
-    this[offset + 2] = (value >>> 16)
-    this[offset + 1] = (value >>> 8)
-    this[offset] = value
-  } else objectWriteUInt32(this, value, offset, true)
-  return offset + 4
-}
-
-Buffer.prototype.writeUInt32BE = function (value, offset, noAssert) {
-  value = +value
-  offset = offset >>> 0
-  if (!noAssert)
-    checkInt(this, value, offset, 4, 0xffffffff, 0)
-  if (Buffer.TYPED_ARRAY_SUPPORT) {
-    this[offset] = (value >>> 24)
-    this[offset + 1] = (value >>> 16)
-    this[offset + 2] = (value >>> 8)
-    this[offset + 3] = value
-  } else objectWriteUInt32(this, value, offset, false)
-  return offset + 4
-}
-
-Buffer.prototype.writeIntLE = function (value, offset, byteLength, noAssert) {
-  value = +value
-  offset = offset >>> 0
-  if (!noAssert) {
-    checkInt(this,
-             value,
-             offset,
-             byteLength,
-             Math.pow(2, 8 * byteLength - 1) - 1,
-             -Math.pow(2, 8 * byteLength - 1))
-  }
-
-  var i = 0
-  var mul = 1
-  var sub = value < 0 ? 1 : 0
-  this[offset] = value & 0xFF
-  while (++i < byteLength && (mul *= 0x100))
-    this[offset + i] = ((value / mul) >> 0) - sub & 0xFF
-
-  return offset + byteLength
-}
-
-Buffer.prototype.writeIntBE = function (value, offset, byteLength, noAssert) {
-  value = +value
-  offset = offset >>> 0
-  if (!noAssert) {
-    checkInt(this,
-             value,
-             offset,
-             byteLength,
-             Math.pow(2, 8 * byteLength - 1) - 1,
-             -Math.pow(2, 8 * byteLength - 1))
-  }
-
-  var i = byteLength - 1
-  var mul = 1
-  var sub = value < 0 ? 1 : 0
-  this[offset + i] = value & 0xFF
-  while (--i >= 0 && (mul *= 0x100))
-    this[offset + i] = ((value / mul) >> 0) - sub & 0xFF
-
-  return offset + byteLength
-}
-
-Buffer.prototype.writeInt8 = function (value, offset, noAssert) {
-  value = +value
-  offset = offset >>> 0
-  if (!noAssert)
-    checkInt(this, value, offset, 1, 0x7f, -0x80)
-  if (!Buffer.TYPED_ARRAY_SUPPORT) value = Math.floor(value)
-  if (value < 0) value = 0xff + value + 1
-  this[offset] = value
-  return offset + 1
-}
-
-Buffer.prototype.writeInt16LE = function (value, offset, noAssert) {
-  value = +value
-  offset = offset >>> 0
-  if (!noAssert)
-    checkInt(this, value, offset, 2, 0x7fff, -0x8000)
-  if (Buffer.TYPED_ARRAY_SUPPORT) {
-    this[offset] = value
-    this[offset + 1] = (value >>> 8)
-  } else objectWriteUInt16(this, value, offset, true)
-  return offset + 2
-}
-
-Buffer.prototype.writeInt16BE = function (value, offset, noAssert) {
-  value = +value
-  offset = offset >>> 0
-  if (!noAssert)
-    checkInt(this, value, offset, 2, 0x7fff, -0x8000)
-  if (Buffer.TYPED_ARRAY_SUPPORT) {
-    this[offset] = (value >>> 8)
-    this[offset + 1] = value
-  } else objectWriteUInt16(this, value, offset, false)
-  return offset + 2
-}
-
-Buffer.prototype.writeInt32LE = function (value, offset, noAssert) {
-  value = +value
-  offset = offset >>> 0
-  if (!noAssert)
-    checkInt(this, value, offset, 4, 0x7fffffff, -0x80000000)
-  if (Buffer.TYPED_ARRAY_SUPPORT) {
-    this[offset] = value
-    this[offset + 1] = (value >>> 8)
-    this[offset + 2] = (value >>> 16)
-    this[offset + 3] = (value >>> 24)
-  } else objectWriteUInt32(this, value, offset, true)
-  return offset + 4
-}
-
-Buffer.prototype.writeInt32BE = function (value, offset, noAssert) {
-  value = +value
-  offset = offset >>> 0
-  if (!noAssert)
-    checkInt(this, value, offset, 4, 0x7fffffff, -0x80000000)
-  if (value < 0) value = 0xffffffff + value + 1
-  if (Buffer.TYPED_ARRAY_SUPPORT) {
-    this[offset] = (value >>> 24)
-    this[offset + 1] = (value >>> 16)
-    this[offset + 2] = (value >>> 8)
-    this[offset + 3] = value
-  } else objectWriteUInt32(this, value, offset, false)
-  return offset + 4
-}
-
-function checkIEEE754 (buf, value, offset, ext, max, min) {
-  if (value > max || value < min) throw new RangeError('value is out of bounds')
-  if (offset + ext > buf.length) throw new RangeError('index out of range')
-  if (offset < 0) throw new RangeError('index out of range')
-}
-
-function writeFloat (buf, value, offset, littleEndian, noAssert) {
-  if (!noAssert)
-    checkIEEE754(buf, value, offset, 4, 3.4028234663852886e+38, -3.4028234663852886e+38)
-  ieee754.write(buf, value, offset, littleEndian, 23, 4)
-  return offset + 4
-}
-
-Buffer.prototype.writeFloatLE = function (value, offset, noAssert) {
-  return writeFloat(this, value, offset, true, noAssert)
-}
-
-Buffer.prototype.writeFloatBE = function (value, offset, noAssert) {
-  return writeFloat(this, value, offset, false, noAssert)
-}
-
-function writeDouble (buf, value, offset, littleEndian, noAssert) {
-  if (!noAssert)
-    checkIEEE754(buf, value, offset, 8, 1.7976931348623157E+308, -1.7976931348623157E+308)
-  ieee754.write(buf, value, offset, littleEndian, 52, 8)
-  return offset + 8
-}
-
-Buffer.prototype.writeDoubleLE = function (value, offset, noAssert) {
-  return writeDouble(this, value, offset, true, noAssert)
-}
-
-Buffer.prototype.writeDoubleBE = function (value, offset, noAssert) {
-  return writeDouble(this, value, offset, false, noAssert)
-}
-
-// copy(targetBuffer, targetStart=0, sourceStart=0, sourceEnd=buffer.length)
-Buffer.prototype.copy = function (target, target_start, start, end) {
-  var source = this
-
-  if (!start) start = 0
-  if (!end && end !== 0) end = this.length
-  if (target_start >= target.length) target_start = target.length
-  if (!target_start) target_start = 0
-  if (end > 0 && end < start) end = start
-
-  // Copy 0 bytes; we're done
-  if (end === start) return 0
-  if (target.length === 0 || source.length === 0) return 0
-
-  // Fatal error conditions
-  if (target_start < 0)
-    throw new RangeError('targetStart out of bounds')
-  if (start < 0 || start >= source.length) throw new RangeError('sourceStart out of bounds')
-  if (end < 0) throw new RangeError('sourceEnd out of bounds')
-
-  // Are we oob?
-  if (end > this.length)
-    end = this.length
-  if (target.length - target_start < end - start)
-    end = target.length - target_start + start
-
-  var len = end - start
-
-  if (len < 1000 || !Buffer.TYPED_ARRAY_SUPPORT) {
-    for (var i = 0; i < len; i++) {
-      target[i + target_start] = this[i + start]
-    }
-  } else {
-    target._set(this.subarray(start, start + len), target_start)
-  }
-
-  return len
-}
-
-// fill(value, start=0, end=buffer.length)
-Buffer.prototype.fill = function (value, start, end) {
-  if (!value) value = 0
-  if (!start) start = 0
-  if (!end) end = this.length
-
-  if (end < start) throw new RangeError('end < start')
-
-  // Fill 0 bytes; we're done
-  if (end === start) return
-  if (this.length === 0) return
-
-  if (start < 0 || start >= this.length) throw new RangeError('start out of bounds')
-  if (end < 0 || end > this.length) throw new RangeError('end out of bounds')
-
-  var i
-  if (typeof value === 'number') {
-    for (i = start; i < end; i++) {
-      this[i] = value
-    }
-  } else {
-    var bytes = utf8ToBytes(value.toString())
-    var len = bytes.length
-    for (i = start; i < end; i++) {
-      this[i] = bytes[i % len]
-    }
-  }
-
-  return this
-}
-
-/**
- * Creates a new `ArrayBuffer` with the *copied* memory of the buffer instance.
- * Added in Node 0.12. Only available in browsers that support ArrayBuffer.
- */
-Buffer.prototype.toArrayBuffer = function () {
-  if (typeof Uint8Array !== 'undefined') {
-    if (Buffer.TYPED_ARRAY_SUPPORT) {
-      return (new Buffer(this)).buffer
-    } else {
-      var buf = new Uint8Array(this.length)
-      for (var i = 0, len = buf.length; i < len; i += 1) {
-        buf[i] = this[i]
-      }
-      return buf.buffer
-    }
-  } else {
-    throw new TypeError('Buffer.toArrayBuffer not supported in this browser')
-  }
-}
-
-// HELPER FUNCTIONS
-// ================
-
-var BP = Buffer.prototype
-
-/**
- * Augment a Uint8Array *instance* (not the Uint8Array class!) with Buffer methods
- */
-Buffer._augment = function (arr) {
-  arr.constructor = Buffer
-  arr._isBuffer = true
-
-  // save reference to original Uint8Array get/set methods before overwriting
-  arr._get = arr.get
-  arr._set = arr.set
-
-  // deprecated, will be removed in node 0.13+
-  arr.get = BP.get
-  arr.set = BP.set
-
-  arr.write = BP.write
-  arr.toString = BP.toString
-  arr.toLocaleString = BP.toString
-  arr.toJSON = BP.toJSON
-  arr.equals = BP.equals
-  arr.compare = BP.compare
-  arr.copy = BP.copy
-  arr.slice = BP.slice
-  arr.readUIntLE = BP.readUIntLE
-  arr.readUIntBE = BP.readUIntBE
-  arr.readUInt8 = BP.readUInt8
-  arr.readUInt16LE = BP.readUInt16LE
-  arr.readUInt16BE = BP.readUInt16BE
-  arr.readUInt32LE = BP.readUInt32LE
-  arr.readUInt32BE = BP.readUInt32BE
-  arr.readIntLE = BP.readIntLE
-  arr.readIntBE = BP.readIntBE
-  arr.readInt8 = BP.readInt8
-  arr.readInt16LE = BP.readInt16LE
-  arr.readInt16BE = BP.readInt16BE
-  arr.readInt32LE = BP.readInt32LE
-  arr.readInt32BE = BP.readInt32BE
-  arr.readFloatLE = BP.readFloatLE
-  arr.readFloatBE = BP.readFloatBE
-  arr.readDoubleLE = BP.readDoubleLE
-  arr.readDoubleBE = BP.readDoubleBE
-  arr.writeUInt8 = BP.writeUInt8
-  arr.writeUIntLE = BP.writeUIntLE
-  arr.writeUIntBE = BP.writeUIntBE
-  arr.writeUInt16LE = BP.writeUInt16LE
-  arr.writeUInt16BE = BP.writeUInt16BE
-  arr.writeUInt32LE = BP.writeUInt32LE
-  arr.writeUInt32BE = BP.writeUInt32BE
-  arr.writeIntLE = BP.writeIntLE
-  arr.writeIntBE = BP.writeIntBE
-  arr.writeInt8 = BP.writeInt8
-  arr.writeInt16LE = BP.writeInt16LE
-  arr.writeInt16BE = BP.writeInt16BE
-  arr.writeInt32LE = BP.writeInt32LE
-  arr.writeInt32BE = BP.writeInt32BE
-  arr.writeFloatLE = BP.writeFloatLE
-  arr.writeFloatBE = BP.writeFloatBE
-  arr.writeDoubleLE = BP.writeDoubleLE
-  arr.writeDoubleBE = BP.writeDoubleBE
-  arr.fill = BP.fill
-  arr.inspect = BP.inspect
-  arr.toArrayBuffer = BP.toArrayBuffer
-
-  return arr
-}
-
-var INVALID_BASE64_RE = /[^+\/0-9A-z\-]/g
-
-function base64clean (str) {
-  // Node strips out invalid characters like \n and \t from the string, base64-js does not
-  str = stringtrim(str).replace(INVALID_BASE64_RE, '')
-  // replace url-safe space and slash
-  str = str.replace(/-/g, '+').replace(/_/g, '/')
-  // Node converts strings with length < 2 to ''
-  if (str.length < 2) return ''
-  // Node allows for non-padded base64 strings (missing trailing ===), base64-js does not
-  while (str.length % 4 !== 0) {
-    str = str + '='
-  }
-  return str
-}
-
-function stringtrim (str) {
-  if (str.trim) return str.trim()
-  return str.replace(/^\s+|\s+$/g, '')
-}
-
-function isArrayish (subject) {
-  return isArray(subject) || Buffer.isBuffer(subject) ||
-      subject && typeof subject === 'object' &&
-      typeof subject.length === 'number'
-}
-
-function toHex (n) {
-  if (n < 16) return '0' + n.toString(16)
-  return n.toString(16)
-}
-
-function utf8ToBytes(string, units) {
-  var codePoint, length = string.length
-  var leadSurrogate = null
-  units = units || Infinity
-  var bytes = []
-  var i = 0
-
-  for (; i<length; i++) {
-    codePoint = string.charCodeAt(i)
-
-    // is surrogate component
-    if (codePoint > 0xD7FF && codePoint < 0xE000) {
-
-      // last char was a lead
-      if (leadSurrogate) {
-
-        // 2 leads in a row
-        if (codePoint < 0xDC00) {
-          if ((units -= 3) > -1) bytes.push(0xEF, 0xBF, 0xBD)
-          leadSurrogate = codePoint
-          continue
-        }
-
-        // valid surrogate pair
-        else {
-          codePoint = leadSurrogate - 0xD800 << 10 | codePoint - 0xDC00 | 0x10000
-          leadSurrogate = null
-        }
-      }
-
-      // no lead yet
-      else {
-
-        // unexpected trail
-        if (codePoint > 0xDBFF) {
-          if ((units -= 3) > -1) bytes.push(0xEF, 0xBF, 0xBD)
-          continue
-        }
-
-        // unpaired lead
-        else if (i + 1 === length) {
-          if ((units -= 3) > -1) bytes.push(0xEF, 0xBF, 0xBD)
-          continue
-        }
-
-        // valid lead
-        else {
-          leadSurrogate = codePoint
-          continue
-        }
-      }
-    }
-
-    // valid bmp char, but last char was a lead
-    else if (leadSurrogate) {
-      if ((units -= 3) > -1) bytes.push(0xEF, 0xBF, 0xBD)
-      leadSurrogate = null
-    }
-
-    // encode utf8
-    if (codePoint < 0x80) {
-      if ((units -= 1) < 0) break
-      bytes.push(codePoint)
-    }
-    else if (codePoint < 0x800) {
-      if ((units -= 2) < 0) break
-      bytes.push(
-        codePoint >> 0x6 | 0xC0,
-        codePoint & 0x3F | 0x80
-      );
-    }
-    else if (codePoint < 0x10000) {
-      if ((units -= 3) < 0) break
-      bytes.push(
-        codePoint >> 0xC | 0xE0,
-        codePoint >> 0x6 & 0x3F | 0x80,
-        codePoint & 0x3F | 0x80
-      );
-    }
-    else if (codePoint < 0x200000) {
-      if ((units -= 4) < 0) break
-      bytes.push(
-        codePoint >> 0x12 | 0xF0,
-        codePoint >> 0xC & 0x3F | 0x80,
-        codePoint >> 0x6 & 0x3F | 0x80,
-        codePoint & 0x3F | 0x80
-      );
-    }
-    else {
-      throw new Error('Invalid code point')
-    }
-  }
-
-  return bytes
-}
-
-function asciiToBytes (str) {
-  var byteArray = []
-  for (var i = 0; i < str.length; i++) {
-    // Node's code seems to be doing this and not & 0x7F..
-    byteArray.push(str.charCodeAt(i) & 0xFF)
-  }
-  return byteArray
-}
-
-function utf16leToBytes (str, units) {
-  var c, hi, lo
-  var byteArray = []
-  for (var i = 0; i < str.length; i++) {
-
-    if ((units -= 2) < 0) break
-
-    c = str.charCodeAt(i)
-    hi = c >> 8
-    lo = c % 256
-    byteArray.push(lo)
-    byteArray.push(hi)
-  }
-
-  return byteArray
-}
-
-function base64ToBytes (str) {
-  return base64.toByteArray(base64clean(str))
-}
-
-function blitBuffer (src, dst, offset, length, unitSize) {
-  if (unitSize) length -= length % unitSize;
-  for (var i = 0; i < length; i++) {
-    if ((i + offset >= dst.length) || (i >= src.length))
-      break
-    dst[i + offset] = src[i]
-  }
-  return i
-}
-
-function decodeUtf8Char (str) {
-  try {
-    return decodeURIComponent(str)
-  } catch (err) {
-    return String.fromCharCode(0xFFFD) // UTF 8 invalid char
-  }
-}
-
-},{"base64-js":"C:\\Users\\Isaac\\AppData\\Roaming\\npm\\node_modules\\watchify\\node_modules\\browserify\\node_modules\\buffer\\node_modules\\base64-js\\lib\\b64.js","ieee754":"C:\\Users\\Isaac\\AppData\\Roaming\\npm\\node_modules\\watchify\\node_modules\\browserify\\node_modules\\buffer\\node_modules\\ieee754\\index.js","is-array":"C:\\Users\\Isaac\\AppData\\Roaming\\npm\\node_modules\\watchify\\node_modules\\browserify\\node_modules\\buffer\\node_modules\\is-array\\index.js"}],"C:\\Users\\Isaac\\AppData\\Roaming\\npm\\node_modules\\watchify\\node_modules\\browserify\\node_modules\\buffer\\node_modules\\base64-js\\lib\\b64.js":[function(require,module,exports){
-var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-;(function (exports) {
-	'use strict';
-
-  var Arr = (typeof Uint8Array !== 'undefined')
-    ? Uint8Array
-    : Array
-
-	var PLUS   = '+'.charCodeAt(0)
-	var SLASH  = '/'.charCodeAt(0)
-	var NUMBER = '0'.charCodeAt(0)
-	var LOWER  = 'a'.charCodeAt(0)
-	var UPPER  = 'A'.charCodeAt(0)
-
-	function decode (elt) {
-		var code = elt.charCodeAt(0)
-		if (code === PLUS)
-			return 62 // '+'
-		if (code === SLASH)
-			return 63 // '/'
-		if (code < NUMBER)
-			return -1 //no match
-		if (code < NUMBER + 10)
-			return code - NUMBER + 26 + 26
-		if (code < UPPER + 26)
-			return code - UPPER
-		if (code < LOWER + 26)
-			return code - LOWER + 26
-	}
-
-	function b64ToByteArray (b64) {
-		var i, j, l, tmp, placeHolders, arr
-
-		if (b64.length % 4 > 0) {
-			throw new Error('Invalid string. Length must be a multiple of 4')
-		}
-
-		// the number of equal signs (place holders)
-		// if there are two placeholders, than the two characters before it
-		// represent one byte
-		// if there is only one, then the three characters before it represent 2 bytes
-		// this is just a cheap hack to not do indexOf twice
-		var len = b64.length
-		placeHolders = '=' === b64.charAt(len - 2) ? 2 : '=' === b64.charAt(len - 1) ? 1 : 0
-
-		// base64 is 4/3 + up to two characters of the original data
-		arr = new Arr(b64.length * 3 / 4 - placeHolders)
-
-		// if there are placeholders, only get up to the last complete 4 chars
-		l = placeHolders > 0 ? b64.length - 4 : b64.length
-
-		var L = 0
-
-		function push (v) {
-			arr[L++] = v
-		}
-
-		for (i = 0, j = 0; i < l; i += 4, j += 3) {
-			tmp = (decode(b64.charAt(i)) << 18) | (decode(b64.charAt(i + 1)) << 12) | (decode(b64.charAt(i + 2)) << 6) | decode(b64.charAt(i + 3))
-			push((tmp & 0xFF0000) >> 16)
-			push((tmp & 0xFF00) >> 8)
-			push(tmp & 0xFF)
-		}
-
-		if (placeHolders === 2) {
-			tmp = (decode(b64.charAt(i)) << 2) | (decode(b64.charAt(i + 1)) >> 4)
-			push(tmp & 0xFF)
-		} else if (placeHolders === 1) {
-			tmp = (decode(b64.charAt(i)) << 10) | (decode(b64.charAt(i + 1)) << 4) | (decode(b64.charAt(i + 2)) >> 2)
-			push((tmp >> 8) & 0xFF)
-			push(tmp & 0xFF)
-		}
-
-		return arr
-	}
-
-	function uint8ToBase64 (uint8) {
-		var i,
-			extraBytes = uint8.length % 3, // if we have 1 byte left, pad 2 bytes
-			output = "",
-			temp, length
-
-		function encode (num) {
-			return lookup.charAt(num)
-		}
-
-		function tripletToBase64 (num) {
-			return encode(num >> 18 & 0x3F) + encode(num >> 12 & 0x3F) + encode(num >> 6 & 0x3F) + encode(num & 0x3F)
-		}
-
-		// go through the array every three bytes, we'll deal with trailing stuff later
-		for (i = 0, length = uint8.length - extraBytes; i < length; i += 3) {
-			temp = (uint8[i] << 16) + (uint8[i + 1] << 8) + (uint8[i + 2])
-			output += tripletToBase64(temp)
-		}
-
-		// pad the end with zeros, but make sure to not forget the extra bytes
-		switch (extraBytes) {
-			case 1:
-				temp = uint8[uint8.length - 1]
-				output += encode(temp >> 2)
-				output += encode((temp << 4) & 0x3F)
-				output += '=='
-				break
-			case 2:
-				temp = (uint8[uint8.length - 2] << 8) + (uint8[uint8.length - 1])
-				output += encode(temp >> 10)
-				output += encode((temp >> 4) & 0x3F)
-				output += encode((temp << 2) & 0x3F)
-				output += '='
-				break
-		}
-
-		return output
-	}
-
-	exports.toByteArray = b64ToByteArray
-	exports.fromByteArray = uint8ToBase64
-}(typeof exports === 'undefined' ? (this.base64js = {}) : exports))
-
-},{}],"C:\\Users\\Isaac\\AppData\\Roaming\\npm\\node_modules\\watchify\\node_modules\\browserify\\node_modules\\buffer\\node_modules\\ieee754\\index.js":[function(require,module,exports){
-exports.read = function(buffer, offset, isLE, mLen, nBytes) {
-  var e, m,
-      eLen = nBytes * 8 - mLen - 1,
-      eMax = (1 << eLen) - 1,
-      eBias = eMax >> 1,
-      nBits = -7,
-      i = isLE ? (nBytes - 1) : 0,
-      d = isLE ? -1 : 1,
-      s = buffer[offset + i];
-
-  i += d;
-
-  e = s & ((1 << (-nBits)) - 1);
-  s >>= (-nBits);
-  nBits += eLen;
-  for (; nBits > 0; e = e * 256 + buffer[offset + i], i += d, nBits -= 8);
-
-  m = e & ((1 << (-nBits)) - 1);
-  e >>= (-nBits);
-  nBits += mLen;
-  for (; nBits > 0; m = m * 256 + buffer[offset + i], i += d, nBits -= 8);
-
-  if (e === 0) {
-    e = 1 - eBias;
-  } else if (e === eMax) {
-    return m ? NaN : ((s ? -1 : 1) * Infinity);
-  } else {
-    m = m + Math.pow(2, mLen);
-    e = e - eBias;
-  }
-  return (s ? -1 : 1) * m * Math.pow(2, e - mLen);
-};
-
-exports.write = function(buffer, value, offset, isLE, mLen, nBytes) {
-  var e, m, c,
-      eLen = nBytes * 8 - mLen - 1,
-      eMax = (1 << eLen) - 1,
-      eBias = eMax >> 1,
-      rt = (mLen === 23 ? Math.pow(2, -24) - Math.pow(2, -77) : 0),
-      i = isLE ? 0 : (nBytes - 1),
-      d = isLE ? 1 : -1,
-      s = value < 0 || (value === 0 && 1 / value < 0) ? 1 : 0;
-
-  value = Math.abs(value);
-
-  if (isNaN(value) || value === Infinity) {
-    m = isNaN(value) ? 1 : 0;
-    e = eMax;
-  } else {
-    e = Math.floor(Math.log(value) / Math.LN2);
-    if (value * (c = Math.pow(2, -e)) < 1) {
-      e--;
-      c *= 2;
-    }
-    if (e + eBias >= 1) {
-      value += rt / c;
-    } else {
-      value += rt * Math.pow(2, 1 - eBias);
-    }
-    if (value * c >= 2) {
-      e++;
-      c /= 2;
-    }
-
-    if (e + eBias >= eMax) {
-      m = 0;
-      e = eMax;
-    } else if (e + eBias >= 1) {
-      m = (value * c - 1) * Math.pow(2, mLen);
-      e = e + eBias;
-    } else {
-      m = value * Math.pow(2, eBias - 1) * Math.pow(2, mLen);
-      e = 0;
-    }
-  }
-
-  for (; mLen >= 8; buffer[offset + i] = m & 0xff, i += d, m /= 256, mLen -= 8);
-
-  e = (e << mLen) | m;
-  eLen += mLen;
-  for (; eLen > 0; buffer[offset + i] = e & 0xff, i += d, e /= 256, eLen -= 8);
-
-  buffer[offset + i - d] |= s * 128;
-};
-
-},{}],"C:\\Users\\Isaac\\AppData\\Roaming\\npm\\node_modules\\watchify\\node_modules\\browserify\\node_modules\\buffer\\node_modules\\is-array\\index.js":[function(require,module,exports){
-
-/**
- * isArray
- */
-
-var isArray = Array.isArray;
-
-/**
- * toString
- */
-
-var str = Object.prototype.toString;
-
-/**
- * Whether or not the given `val`
- * is an array.
- *
- * example:
- *
- *        isArray([]);
- *        // > true
- *        isArray(arguments);
- *        // > false
- *        isArray('');
- *        // > false
- *
- * @param {mixed} val
- * @return {bool}
- */
-
-module.exports = isArray || function (val) {
-  return !! val && '[object Array]' == str.call(val);
-};
-
-},{}],"C:\\Users\\Isaac\\AppData\\Roaming\\npm\\node_modules\\watchify\\node_modules\\browserify\\node_modules\\process\\browser.js":[function(require,module,exports){
+(function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({"C:\\Users\\Isaac\\AppData\\Roaming\\npm\\node_modules\\watchify\\node_modules\\browserify\\node_modules\\process\\browser.js":[function(require,module,exports){
 // shim for using process in browser
 
 var process = module.exports = {};
@@ -1664,6 +101,7 @@ var React = require('react/addons'),
     CharacterList   = require("./app/CharacterList.jsx"),
     CharacterEditor = require("./app/CharacterEditor.jsx"),
     CharacterPlayer = require("./app/CharacterPlayer.jsx");
+    Spellbook       = require("./app/Spellbook.jsx");
 
 
 // For browser react tools
@@ -1681,6 +119,7 @@ var routes = (
     React.createElement(DefaultRoute, {handler: CharacterList}), 
     React.createElement(Route, {name: "editor", route: "editor", handler: CharacterEditor}), 
     React.createElement(Route, {name: "player", route: "player", handler: CharacterPlayer}), 
+    React.createElement(Route, {name: "spellbook", route: "spellbook", handler: Spellbook}), 
     React.createElement(NotFoundRoute, {handler: CharacterList})
   )
 );
@@ -1689,7 +128,7 @@ var routes = (
 Router.run(routes, function (Handler) {
   React.render(React.createElement(Handler, null), document.body);
 });
-},{"./app/CharacterEditor.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterEditor.jsx","./app/CharacterList.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterList.jsx","./app/CharacterPlayer.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterPlayer.jsx","./app/HeroForge.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\HeroForge.jsx","react-router":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js","react-tap-event-plugin":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-tap-event-plugin\\src\\injectTapEventPlugin.js","react/addons":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\addons.js","sugar":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\sugar\\release\\sugar-full.development.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterEditor.jsx":[function(require,module,exports){
+},{"./app/CharacterEditor.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterEditor.jsx","./app/CharacterList.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterList.jsx","./app/CharacterPlayer.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterPlayer.jsx","./app/HeroForge.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\HeroForge.jsx","./app/Spellbook.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\Spellbook.jsx","react-router":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js","react-tap-event-plugin":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-tap-event-plugin\\src\\injectTapEventPlugin.js","react/addons":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\addons.js","sugar":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\sugar\\release\\sugar-full.development.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterEditor.jsx":[function(require,module,exports){
 var React = require('react'),
     
     Reflux = require('reflux'),
@@ -1712,7 +151,7 @@ var CharacterEditor = React.createClass({displayName: "CharacterEditor",
   render: function() {
     var character = this.props.character;
     return (
-      React.createElement(HFRouteWrapper, {className: "hf-mode page", user: this.props.user, title: character.name, subtitle: "Editing"}, 
+      React.createElement(HFRouteWrapper, {showBack: true, className: "hf-mode page", user: this.props.user, title: character.name, subtitle: "Editing"}, 
         React.createElement(HFPage, null, 
           (character) ?
               React.createElement("h4", null, React.createElement("strong", null, "Editing a character called ", character.name))
@@ -1735,7 +174,7 @@ var CharacterEditor = React.createClass({displayName: "CharacterEditor",
 });
 
 module.exports = CharacterEditor;
-},{"./actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFPage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFPage.jsx","./components/HFRouteWrapper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx","./stores/UserStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\UserStore.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterList.jsx":[function(require,module,exports){
+},{"./actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFPage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFPage.jsx","./components/HFRouteWrapper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx","./stores/UserStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\UserStore.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterList.jsx":[function(require,module,exports){
 var React = require('react'),
 
     mui = require('material-ui'),
@@ -1744,8 +183,11 @@ var React = require('react'),
     Reflux = require('reflux'),
     CharacterActions = require('./actions/CharacterActions.js'),
     RouteActions = require('./actions/RouteActions.js'),
+    DialogActions = require('./actions/DialogActions.js'),
     
-    HFRouteWrapper = require('./components/HFRouteWrapper.jsx');
+    HFOpenCharacterDialog = require('./components/dialogs/HFOpenCharacterDialog.jsx'),
+    
+    HFRouteWrapper = require('./components/HFRouteWrapper.jsx'),
     HFCharacterListItem = require('./components/HFCharacterListItem.jsx');
 
 
@@ -1758,12 +200,19 @@ var CharacterList = React.createClass({displayName: "CharacterList",
     CharacterActions.loadCharacter(character, "player");
   },
   
+  newCharacterBox: function() {
+    DialogActions.open({
+      component: HFOpenCharacterDialog,
+      props: {}
+    });
+  },
+  
   render: function() {
     return (
       React.createElement(HFRouteWrapper, {className: "hf-mode list", user: this.props.user}, 
         (this.props.user) ?
           React.createElement("ul", null, 
-            React.createElement("li", {onTouchTap: CharacterActions.newCharacter}, 
+            React.createElement("li", {onTouchTap: this.newCharacterBox}, 
               React.createElement(HFCharacterListItem, {newCreator: true, character: {name:'New Character'}})
             ), 
             this.props.user.characters.map(function(character) {
@@ -1787,7 +236,7 @@ var CharacterList = React.createClass({displayName: "CharacterList",
 });
 
 module.exports = CharacterList;
-},{"./actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFCharacterListItem.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFCharacterListItem.jsx","./components/HFRouteWrapper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterPlayer.jsx":[function(require,module,exports){
+},{"./actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","./actions/DialogActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\DialogActions.js","./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFCharacterListItem.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFCharacterListItem.jsx","./components/HFRouteWrapper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx","./components/dialogs/HFOpenCharacterDialog.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\dialogs\\HFOpenCharacterDialog.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\CharacterPlayer.jsx":[function(require,module,exports){
 var React = require('react'),
     
     Reflux = require('reflux'),
@@ -1810,7 +259,7 @@ var CharacterPlayer = React.createClass({displayName: "CharacterPlayer",
   render: function() {
     var character = this.props.character;
     return (
-      React.createElement(HFRouteWrapper, {className: "hf-mode page", user: this.props.user, title: character.name, subtitle: "Play Mode"}, 
+      React.createElement(HFRouteWrapper, {showBack: true, className: "hf-mode page", user: this.props.user, title: character.name, subtitle: "Play Mode"}, 
         React.createElement(HFPage, null, 
           (character) ?
               React.createElement("h4", null, React.createElement("strong", null, "Playing a character called ", character.name))
@@ -1833,7 +282,7 @@ var CharacterPlayer = React.createClass({displayName: "CharacterPlayer",
 });
 
 module.exports = CharacterPlayer;
-},{"./actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFPage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFPage.jsx","./components/HFRouteWrapper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx","./stores/UserStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\UserStore.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\HeroForge.jsx":[function(require,module,exports){
+},{"./actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFPage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFPage.jsx","./components/HFRouteWrapper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx","./stores/UserStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\UserStore.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\HeroForge.jsx":[function(require,module,exports){
 var React = require('react'),
     
     Router = require('react-router'),
@@ -1883,7 +332,120 @@ var HeroForge = React.createClass({displayName: "HeroForge",
 });
 
 module.exports = HeroForge;
-},{"./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFMenuBar.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBar.jsx","./stores/CharacterStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\CharacterStore.js","./stores/RouteStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\RouteStore.js","./stores/SoundStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\SoundStore.js","./stores/UserStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\UserStore.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react-router":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js":[function(require,module,exports){
+},{"./actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","./components/HFMenuBar.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBar.jsx","./stores/CharacterStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\CharacterStore.js","./stores/RouteStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\RouteStore.js","./stores/SoundStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\SoundStore.js","./stores/UserStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\UserStore.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react-router":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\Spellbook.jsx":[function(require,module,exports){
+var React = require('react'),
+    
+    mui = require('material-ui'),
+    DropDownMenu = mui.DropDownMenu,
+    TextField = mui.TextField,
+    
+    HFRouteWrapper = require('./components/HFRouteWrapper.jsx'),
+    HFPage = require('./components/HFPage.jsx'),
+    HFSpellDialog = require('./components/dialogs/HFSpellDialog.jsx'),
+    
+    DialogActions = require('./actions/DialogActions.js'),
+    
+    spellData = require('./data/spells.js');
+
+
+var Spellbook = React.createClass({displayName: "Spellbook",
+  
+  getInitialState: function() {
+    return {
+      className: "",
+      searchField: "",
+      spellLevel: ""
+    };
+  },
+  
+  handleSearch: function() {
+    this.setState({searchField: this.refs.searchText.getValue()});
+  },
+  handleClassChange: function(e, selectedIndex, menuItem) {
+    this.setState({className: menuItem.payload});
+  },
+  handleLevelChange: function(e, selectedIndex, menuItem) {
+    this.setState({spellLevel: menuItem.payload});
+  },
+  
+  selectSpell: function(spell) {
+    DialogActions.open({
+      component: HFSpellDialog,
+      props: spell
+    });
+  },
+  
+  render: function() {
+    var classes = [
+          { payload: '',         text: 'On Class List (All)' },
+          { payload: 'bard',     text: 'Bard' },
+          { payload: 'cleric',   text: 'Cleric' },
+          { payload: 'druid',    text: 'Druid' },
+          { payload: 'paladin',  text: 'Paladin' },
+          { payload: 'ranger',   text: 'Ranger' },
+          { payload: 'sorcerer', text: 'Sorcerer' },
+          { payload: 'warlock',  text: 'Warlock' },
+          { payload: 'wizard',   text: 'Wizard' }
+        ],
+        levels = [
+          { payload: '', text: 'Spell Level (All)' },
+          { payload: 0,  text: 'Cantrip' },
+          { payload: 1,  text: '1' },
+          { payload: 2,  text: '2' },
+          { payload: 3,  text: '3' },
+          { payload: 4,  text: '4' },
+          { payload: 5,  text: '5' },
+          { payload: 6,  text: '6' },
+          { payload: 7,  text: '7' },
+          { payload: 8,  text: '8' },
+          { payload: 9,  text: '9' }
+        ],
+        sortedSpells = spellData.sortBy('name');
+        spells = sortedSpells.filter(function(spell) {
+          var isClass   = (this.state.className === "")   || (spell.class_list[this.state.className] === true),
+              isLevel   = (this.state.spellLevel === "")  || (spell.level === this.state.spellLevel),
+              hasSearch = (this.state.searchField === "") ||
+                          (spell.name.toLowerCase().indexOf(this.state.searchField.toLowerCase()) !== -1);
+          return (isClass && isLevel && hasSearch);
+        }, this);
+    
+    return (
+      React.createElement(HFRouteWrapper, {route: "spellbook", className: "hf-mode page", user: this.props.user, title: "Spellbook"}, 
+        React.createElement(HFPage, null, 
+          
+          React.createElement("div", {className: "filters"}, 
+            React.createElement("div", {className: "options"}, 
+              React.createElement(DropDownMenu, {menuItems: classes, value: this.state.className, onChange: this.handleClassChange}), 
+              React.createElement(DropDownMenu, {menuItems: levels, value: this.state.spellLevel, onChange: this.handleLevelChange})
+            ), 
+            
+            React.createElement(TextField, {className: "search", ref: "searchText", floatingLabelText: "Search", hintText: "e.g. fireball", onChange: this.handleSearch})
+          ), 
+          
+          React.createElement("ul", {className: "spell-list"}, 
+            React.createElement("li", {key: "header", className: "spell-row header"}, 
+              React.createElement("span", null), 
+              React.createElement("span", {className: "level"}, "Level")
+            ), 
+            spells.map(function(spell) {
+              return (
+                React.createElement("li", {className: "spell-row item", key: spell.name, onTouchTap: this.selectSpell.bind(null, spell)}, 
+                  React.createElement("span", {className: "name"}, spell.name), 
+                  React.createElement("span", {className: "level"}, spell.level || "Cantrip")
+                )
+              );
+            }, this)
+          )
+          
+        )
+      )
+    );
+  }
+  
+});
+
+module.exports = Spellbook;
+},{"./actions/DialogActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\DialogActions.js","./components/HFPage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFPage.jsx","./components/HFRouteWrapper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx","./components/dialogs/HFSpellDialog.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\dialogs\\HFSpellDialog.jsx","./data/spells.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\data\\spells.js","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js":[function(require,module,exports){
 var Reflux = require('reflux');
 
 var CharacterActions = Reflux.createActions([
@@ -1892,7 +454,16 @@ var CharacterActions = Reflux.createActions([
 ]);
 
 module.exports = CharacterActions;
-},{"reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js":[function(require,module,exports){
+},{"reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\DialogActions.js":[function(require,module,exports){
+var Reflux = require('reflux');
+
+var DialogActions = Reflux.createActions([
+  'open',
+  'close'
+]);
+
+module.exports = DialogActions;
+},{"reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js":[function(require,module,exports){
 var Reflux = require('reflux');
 
 var RouteActions = Reflux.createActions([
@@ -1900,7 +471,7 @@ var RouteActions = Reflux.createActions([
 ]);
 
 module.exports = RouteActions;
-},{"reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\SoundActions.js":[function(require,module,exports){
+},{"reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\SoundActions.js":[function(require,module,exports){
 var Reflux = require('reflux');
 
 var SoundActions = Reflux.createActions([
@@ -1909,7 +480,7 @@ var SoundActions = Reflux.createActions([
 ]);
 
 module.exports = SoundActions;
-},{"reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\UserActions.js":[function(require,module,exports){
+},{"reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\UserActions.js":[function(require,module,exports){
 var Reflux = require('reflux');
 
 var UserActions = Reflux.createActions([
@@ -1918,7 +489,7 @@ var UserActions = Reflux.createActions([
 ]);
 
 module.exports = UserActions;
-},{"reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFAvatarImage.jsx":[function(require,module,exports){
+},{"reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFAvatarImage.jsx":[function(require,module,exports){
 var React = require('react');
 
 var HFAvatarImage = React.createClass({displayName: "HFAvatarImage",
@@ -1968,7 +539,7 @@ var HFButton = React.createClass({displayName: "HFButton",
 });
 
 module.exports = HFButton;
-},{"../actions/SoundActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\SoundActions.js","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFCharacterListItem.jsx":[function(require,module,exports){
+},{"../actions/SoundActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\SoundActions.js","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFCharacterListItem.jsx":[function(require,module,exports){
 var React = require('react'),
 
     mui = require('material-ui'),
@@ -2005,7 +576,61 @@ var HFCharacterListItem = React.createClass({displayName: "HFCharacterListItem",
 });
 
 module.exports = HFCharacterListItem;
-},{"./HFAvatarImage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFAvatarImage.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBar.jsx":[function(require,module,exports){
+},{"./HFAvatarImage.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFAvatarImage.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFDialogManager.jsx":[function(require,module,exports){
+var React = require('react'),
+    
+    Reflux = require('reflux'),
+    
+    DialogStore = require('../stores/DialogStore.js');
+
+
+var HFDialogManager = React.createClass({displayName: "HFDialogManager",
+  mixins: [Reflux.listenTo(DialogStore,"onDialogChange")],
+  
+  getInitialState: function() {
+    return {
+      dialog: {
+        component: null,
+        props: {}
+      },
+      isNew: false
+    };
+  },
+  
+  onDialogChange: function(action, dialog) {
+    switch (action) {
+      case "close": this.refs.dialog.dismiss(); break;
+      case "open":  this.setState({dialog:dialog, isNew:true}); break;
+    }
+  },
+  
+  componentDidUpdate: function() {
+    if (this.state.isNew) this.refs.dialog.show();
+  },
+  
+  onShow: function() {
+    this.setState({isNew:false});
+  },
+  
+  onDismiss: function() {},
+  
+  render: function() {
+    var Dialog = this.state.dialog.component;
+    return (
+      React.createElement("div", {id: "dialog-container"}, 
+        (Dialog !== null) ?
+          React.createElement(Dialog, React.__spread({ref: "dialog"},  this.state.dialog.props, {onShow: this.onShow, onDismiss: this.onDismiss}))
+          :
+          []
+        
+      )
+    );
+  }
+
+});
+
+module.exports = HFDialogManager;
+},{"../stores/DialogStore.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\DialogStore.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBar.jsx":[function(require,module,exports){
 var React = require('react'),
 
     Navigation = require('react-router').Navigation,
@@ -2025,10 +650,10 @@ var HFMenuBar = React.createClass({displayName: "HFMenuBar",
   render: function() {
     
     return (
-      React.createElement(Paper, {id: "pf-menubar", className: "paper", zDepth: 2, rounded: false}, 
+      React.createElement(Paper, {id: "pf-menubar", className: "menubar paper", zDepth: 2, rounded: false}, 
         React.createElement("div", {className: "inner"}, 
           React.createElement("div", {className: "left-group"}, 
-            (this.props.title) ?
+            (this.props.showBack) ? 
               React.createElement(HFButton, {label: "Back", primary: true, onTouchTap: this.goBack, className: "menu-button main"})
               :
               []
@@ -2052,7 +677,7 @@ var HFMenuBar = React.createClass({displayName: "HFMenuBar",
 });
 
 module.exports = HFMenuBar;
-},{"../actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","../actions/UserActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\UserActions.js","./HFButton.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFButton.jsx","./HFMenuBarTitle.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBarTitle.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react-router":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBarTitle.jsx":[function(require,module,exports){
+},{"../actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","../actions/UserActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\UserActions.js","./HFButton.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFButton.jsx","./HFMenuBarTitle.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBarTitle.jsx","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react-router":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBarTitle.jsx":[function(require,module,exports){
 var React = require('react');
 
 var HFMenuBarTitle = React.createClass({displayName: "HFMenuBarTitle",
@@ -2104,9 +729,10 @@ var HFPage = React.createClass({displayName: "HFPage",
 });
 
 module.exports = HFPage;
-},{"material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx":[function(require,module,exports){
+},{"material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFRouteWrapper.jsx":[function(require,module,exports){
 var React = require('react'),
     
+    HFDialogManager = require('./HFDialogManager.jsx'),
     HFMenuBar = require('./HFMenuBar.jsx');
 
 
@@ -2114,14 +740,16 @@ var HFRouteWrapper = React.createClass({displayName: "HFRouteWrapper",
 
   render: function() {
     return (
-      React.createElement("div", null, 
-        React.createElement(HFMenuBar, {user: this.props.user, title: this.props.title, subtitle: this.props.subtitle}), 
+      React.createElement("div", {className: this.props.route}, 
+        React.createElement(HFMenuBar, {showBack: this.props.showBack, user: this.props.user, title: this.props.title, subtitle: this.props.subtitle}), 
         
         React.createElement("div", {className: "main-wrapper"}, 
           React.createElement("div", {className: this.props.className}, 
             this.props.children
           )
-        )
+        ), 
+        
+        React.createElement(HFDialogManager, null)
       )
     );
   }
@@ -2129,7 +757,9129 @@ var HFRouteWrapper = React.createClass({displayName: "HFRouteWrapper",
 });
 
 module.exports = HFRouteWrapper;
-},{"./HFMenuBar.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBar.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\CharacterStore.js":[function(require,module,exports){
+},{"./HFDialogManager.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFDialogManager.jsx","./HFMenuBar.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\HFMenuBar.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\dialogs\\HFDialogMixin.js":[function(require,module,exports){
+module.exports = {
+  
+  show: function() {
+    this.refs.dialog.show();
+  },
+  
+  dismiss: function() {
+    this.refs.dialog.dismiss();
+  },
+  
+};
+
+},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\dialogs\\HFOpenCharacterDialog.jsx":[function(require,module,exports){
+var React = require('react'),
+    
+    mui = require('material-ui'),
+    Dialog = mui.Dialog,
+    
+    HFDialogMixin = require('./HFDialogMixin.js');
+
+var HFOpenCharacterDialog = React.createClass({displayName: "HFOpenCharacterDialog",
+  mixins: [HFDialogMixin],
+  
+  render: function() {
+    var dialogActions = [
+      { text: 'OK' }
+    ];
+    return (
+      React.createElement(Dialog, React.__spread({ref: "dialog"},  this.props, {title: "New Character", actions: dialogActions}), 
+        "This is a test of a dialog."
+      )
+    );
+  }
+
+});
+
+module.exports = HFOpenCharacterDialog;
+},{"./HFDialogMixin.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\dialogs\\HFDialogMixin.js","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\dialogs\\HFSpellDialog.jsx":[function(require,module,exports){
+var React = require('react'),
+    
+    mui = require('material-ui'),
+    Dialog = mui.Dialog,
+    
+    HFDialogMixin = require('./HFDialogMixin.js');
+
+var HFSpellDialog = React.createClass({displayName: "HFSpellDialog",
+  mixins: [HFDialogMixin],
+  
+  render: function() {
+    var spell = this.props,
+        type = (this.props.level) ?
+          '{l}-level {s}{r}'.assign({
+              l: spell.level.ordinalize(),
+              s: spell.school.toLowerCase(),
+              r: ((spell.ritual) ? ' (ritual)' : '')
+            })
+          :
+          '{1} cantrip'.assign(spell.school);
+
+    var dialogActions = [
+      { text: 'OK' }
+    ];
+    return (
+      React.createElement(Dialog, React.__spread({className: "dialog spell", ref: "dialog"},  this.props, {title: spell.name, actions: dialogActions}), 
+        React.createElement("p", {className: "type"}, type), 
+        React.createElement("ul", {className: "details"}, 
+          React.createElement("li", null, 
+            React.createElement("span", {className: "name"}, "Casting Time: "), 
+            React.createElement("span", null, spell.casting_time)
+          ), 
+          React.createElement("li", null, 
+            React.createElement("span", {className: "name"}, "Range: "), 
+            React.createElement("span", null, spell.range)
+          ), 
+          React.createElement("li", null, 
+            React.createElement("span", {className: "name"}, "Components: "), 
+            React.createElement("span", null, spell.components.replace(/,/g, ', '))
+          ), 
+          React.createElement("li", null, 
+            React.createElement("span", {className: "name"}, "Duration: "), 
+            React.createElement("span", null, spell.casting_time)
+          )
+        ), 
+        React.createElement("p", {className: "description"}, 
+          spell.description
+        )
+      )
+    );
+  }
+
+});
+
+module.exports = HFSpellDialog;
+},{"./HFDialogMixin.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\components\\dialogs\\HFDialogMixin.js","material-ui":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\data\\spells.js":[function(require,module,exports){
+module.exports = [
+  {
+    "name":"Acid Splash",
+    "level":0,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"2 or more creatures",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Acid damage. 1D6 at lvl0, 2D6 at lvl5, 3D6 at lvl11, 4D6 at lvl17"
+  },
+  {
+    "name":"Blade Ward",
+    "level":0,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 round",
+    "range":"Self",
+    "components":"V,S",
+    "scales":false,
+    "description":"Weapon attack damage resistance"
+  },
+  {
+    "name":"Chill Touch",
+    "level":0,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 round",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"1D8 Necrotic damage and can't gain hitpoints. Give undead disadvantage vs. you. Add 1D8 a lvl 5,11 and 17."
+  },
+  {
+    "name":"Dancing Lights",
+    "level":0,
+    "school":"Evocation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"120 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create lights"
+  },
+  {
+    "name":"Druidcraft",
+    "level":0,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"30 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Nature prestidigitations"
+  },
+  {
+    "name":"Eldritch Blast",
+    "level":0,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"1D10 Force damage. Add 1D10 at lvl 5,11 and 17 with seperate attack rolls."
+  },
+  {
+    "name":"Fire Bolt",
+    "level":0,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"1D10 fire damage. Add 1D10 at lvl 5,11 and 17."
+  },
+  {
+    "name":"Friends",
+    "level":0,
+    "school":"Evocation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"S,M",
+    "scales":false,
+    "description":"Charm to gain advantage on Charisma checks"
+  },
+  {
+    "name":"Guidance",
+    "level":0,
+    "school":"Divination",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"1 willing creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":false,
+    "description":"Add 1D4 to ability checks made"
+  },
+  {
+    "name":"Light",
+    "level":0,
+    "school":"Evocation",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,M",
+    "scales":false,
+    "description":"Makes an object give of light"
+  },
+  {
+    "name":"Mage Hand",
+    "level":0,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Summon",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Create hand to aid in simple tasks"
+  },
+  {
+    "name":"Mending",
+    "level":0,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 object",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Repair broken item"
+  },
+  {
+    "name":"Message",
+    "level":0,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 round",
+    "range":"120 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Telepatic message"
+  },
+  {
+    "name":"Minor Illusion",
+    "level":0,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"S,M",
+    "scales":false,
+    "description":"Create a sound or image"
+  },
+  {
+    "name":"Poison Spray",
+    "level":0,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"10 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"1D12 Poison damage. Con save negates. Add 1D12 at lvl 5,11 and 17."
+  },
+  {
+    "name":"Prestidigitation",
+    "level":0,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"10 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Create minutesor magical effects"
+  },
+  {
+    "name":"Produce Flame",
+    "level":0,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"30 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Produce a flame for light or attack (1D8 fire damage. Add 1D8 at lvl 5,11 and 17)"
+  },
+  {
+    "name":"Ray of Frost",
+    "level":0,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"1D8 cold damage and speed is reduced by 10ft. Add 1D8 at lvl 5,11 and 17."
+  },
+  {
+    "name":"Resistance",
+    "level":0,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Add 1D4 to saving throw"
+  },
+  {
+    "name":"Sacred Flame",
+    "level":0,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"1D8 radiant damage, Dex save for half damage. No benefit from cover for this save. Add 1D8 at lvl 5, 11 and 17."
+  },
+  {
+    "name":"Shillelagh",
+    "level":0,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"1 weapon",
+    "casting_time":"1 bonus action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Make club or quarterstaff magical and use spelldamage modifier instead of strength"
+  },
+  {
+    "name":"Shocking Grasp",
+    "level":0,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":true,
+    "description":"Melee spell attack with advantage is target is wearing metal armor. 1D8 lightning damage, add 1D8 at lvl 5, 11 and 17."
+  },
+  {
+    "name":"Spare the Dying",
+    "level":0,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":false,
+    "description":"Stabilize a creature with 0 hit points"
+  },
+  {
+    "name":"Thaumaturgy",
+    "level":0,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V",
+    "scales":false,
+    "description":"Create minutesor illusionary effects"
+  },
+  {
+    "name":"Thorn Whip",
+    "level":0,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Melee spell attack for 1D6 piercing damage and move target 10ft closer. Add 1D6 damage at lvl 5,11 and 17."
+  },
+  {
+    "name":"True Strike",
+    "level":0,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 round",
+    "range":"30 feet",
+    "components":"S",
+    "scales":false,
+    "description":"Gain advantage on attacks"
+  },
+  {
+    "name":"Vicious Mockery",
+    "level":0,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V",
+    "scales":true,
+    "description":"1D4 psychic damage and disadvantage on next attack roll it makes. Wis saving throw ignores. Add 1D4 at lvl 5, 11 and 17."
+  },
+  {
+    "name":"Bane",
+    "level":1,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":false,
+        "paladin":"Vengeance",
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Debuff",
+    "target":"up to three",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"1D4 Debuff on enemy attack rolls and saving throws. target one more per spell slot lvl."
+  },
+  {
+    "name":"Alarm",
+    "level":1,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"Area of Effect",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":true,
+    "duration":"8 hours",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Guard area"
+  },
+  {
+    "name":"Animal Friendship",
+    "level":1,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":"Nature",
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Charm",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 day",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Charm beast"
+  },
+  {
+    "name":"Armor of Agathys",
+    "level":1,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Self",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Temporary hit points and damaging aura. 5hp and 5dmg. +5hp and dmg per spell slot lvl"
+  },
+  {
+    "name":"Arms of Hadar",
+    "level":1,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"10 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Necrotic damage an debuff aura. 2D6 dmg + 1D6 per spell slot lvl"
+  },
+  {
+    "name":"Bless",
+    "level":1,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"up to three",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Add 1D4 to attack rolls and saving throws. target one more per spell slot lvl."
+  },
+  {
+    "name":"Command",
+    "level":1,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":"Fiend",
+        "wizard":false
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 round",
+    "range":"60 feet",
+    "components":"V",
+    "scales":true,
+    "description":"Command target to flee/drop/halt etc"
+  },
+  {
+    "name":"Compelled Duel",
+    "level":1,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V",
+    "scales":false,
+    "description":"Taunt"
+  },
+  {
+    "name":"Cure Wounds",
+    "level":1,
+    "school":"Evocation",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":true,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":true,
+    "description":"Heal a target for 1D8 + spellcasting modifier. Add 1D8 per spell slot lvl. "
+  },
+  {
+    "name":"Detect Evil and Good",
+    "level":1,
+    "school":"Divination",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"Self",
+    "components":"V,S",
+    "scales":false,
+    "description":"Detect fiends, elemental etc"
+  },
+  {
+    "name":"Detect Magic",
+    "level":1,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":true,
+        "ranger":true,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"Self",
+    "components":"V,S",
+    "scales":false,
+    "description":"Detect magic"
+  },
+  {
+    "name":"Detect Poison and Disease",
+    "level":1,
+    "school":"Divination",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":true,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":true,
+    "duration":"10 minutes",
+    "range":"Self",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Detect Poison and Disease"
+  },
+  {
+    "name":"Divine Favor",
+    "level":1,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":"War",
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V,S",
+    "scales":false,
+    "description":"Weapon attacks deal an extra 1D4 radiant damage"
+  },
+  {
+    "name":"Heroism",
+    "level":1,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":true,
+    "description":"Grant immunity to fright and give temporary hitpoints"
+  },
+  {
+    "name":"Burning Hands",
+    "level":1,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":"Light",
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":"Fiend",
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"15 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"3D6 Fire damage AoE with Dex for half damage. Add 1D6 per spell slot lvl."
+  },
+  {
+    "name":"Charm Person",
+    "level":1,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":"Trickery",
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Charm",
+    "target":"1 humanoid",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"30 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Charm a person"
+  },
+  {
+    "name":"Chromatic Orb",
+    "level":1,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"90 feet",
+    "components":"V,S,M,50gp",
+    "scales":true,
+    "description":"3D8 acid, cold, fire, lightning,poison or thunder damage. Add 1D8 per spell slot lvl."
+  },
+  {
+    "name":"Hunter's Mark",
+    "level":1,
+    "school":"Divination",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":"Vengeance",
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"1 creature",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"90 feet",
+    "components":"V",
+    "scales":true,
+    "description":"Mark target causing extra 1D6 damage. Use bonus action to switch to different target."
+  },
+  {
+    "name":"Color Spray",
+    "level":1,
+    "school":"Illusion",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 round",
+    "range":"Self (15-foot cone)",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"AoE blind debuff"
+  },
+  {
+    "name":"Protection from Evil and Good",
+    "level":1,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"1 willing creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Give disadvantage and be protected from conditions"
+  },
+  {
+    "name":"Purify Food and Drink",
+    "level":1,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":true,
+    "duration":"instantaneous",
+    "range":"10 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Purify food and drink in a 5-foot radius sphere"
+  },
+  {
+    "name":"Comprehend Languages",
+    "level":1,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Self",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Read/Understand languages"
+  },
+  {
+    "name":"Searing Smite",
+    "level":1,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V",
+    "scales":true,
+    "description":"Smite for 1D6 fire damage and 1D6 each turn on Con saving throw fail. Add 1D6 to initial damage for each higher spell slot"
+  },
+  {
+    "name":"Create or Destroy Water",
+    "level":1,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create or Destroy water"
+  },
+  {
+    "name":"Shield of Faith",
+    "level":1,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"1 creature",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"target gains +2 AC"
+  },
+  {
+    "name":"Thunderous Smite",
+    "level":1,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V",
+    "scales":false,
+    "description":"Thunder damage smite for 2D6 with 10ft push (Str save on push) and knock prone effect."
+  },
+  {
+    "name":"Wrathful Smite",
+    "level":1,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V",
+    "scales":false,
+    "description":"Deal 1D6 psychic damage. target is frightened on a failed Wis saving throw."
+  },
+  {
+    "name":"Disguise Self",
+    "level":1,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":"Trickery",
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Self",
+    "components":"V,S",
+    "scales":false,
+    "description":"Alter appearance"
+  },
+  {
+    "name":"Dissonant Whispers",
+    "level":1,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":"Great Old One",
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V",
+    "scales":true,
+    "description":"3D6 Psychic damage and flee with Wis save for half damage. Add 1D6 per spell slot lvl."
+  },
+  {
+    "name":"Ensnaring Strike",
+    "level":1,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":"Ancients",
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V",
+    "scales":true,
+    "description":"Restrict and damage (1D6) a creature in the area. Add 1D6 per spell slot lvl."
+  },
+  {
+    "name":"Entangle",
+    "level":1,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Guarding",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"90 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Create area of difficult terrain and restricts"
+  },
+  {
+    "name":"Expeditious Retreat",
+    "level":1,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"Self",
+    "components":"V,S",
+    "scales":false,
+    "description":"Take Dash action as bonus action"
+  },
+  {
+    "name":"Faerie Fire",
+    "level":1,
+    "school":"Evocation",
+    "class_list": {
+        "bard":true,
+        "cleric":"Light",
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":"Archfey",
+        "wizard":false
+    },
+    "type":"Debuff",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V",
+    "scales":false,
+    "description":"Gain advantage, prevent invisibility"
+  },
+  {
+    "name":"False Life",
+    "level":1,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Self",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Gain 1D4 + 4 temporary hitpoints. Add 5hp per spell slot lvl."
+  },
+  {
+    "name":"Feather Fall",
+    "level":1,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 creature",
+    "casting_time":"1 reaction",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,M",
+    "scales":false,
+    "description":"It's feather fall. You know this."
+  },
+  {
+    "name":"Find Familiar",
+    "level":1,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Summon",
+    "target":"Self",
+    "casting_time":"1 hour",
+    "concentration":false,
+    "ritual":true,
+    "duration":"instantaneous",
+    "range":"10 feet",
+    "components":"V,S,M,10gp",
+    "scales":false,
+    "description":"Find a familiar"
+  },
+  {
+    "name":"Fog Cloud",
+    "level":1,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":"Tempest",
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Create an obscuring cloud of fog"
+  },
+  {
+    "name":"Goodberry",
+    "level":1,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Self",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create nourishing berries"
+  },
+  {
+    "name":"Grease",
+    "level":1,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create difficult terrain / fall prone"
+  },
+  {
+    "name":"Guiding Bolt",
+    "level":1,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 round",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"4D6 radiant damage and advantage. Add 1D6 per spell slot lvl."
+  },
+  {
+    "name":"Hail of Thorns",
+    "level":1,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V",
+    "scales":true,
+    "description":"Add piercing thorns for 1D10 to ranged attack. Dex save for half damage. Add 1D10 per spell slot lvl to a max of 6D10."
+  },
+  {
+    "name":"Healing Word",
+    "level":1,
+    "school":"Evocation",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"1 creature",
+    "casting_time":"1 bonus action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V",
+    "scales":true,
+    "description":"Heal for 1D4 + spellcasting modifier. Add 1D4 per spell slot lvl."
+  },
+  {
+    "name":"Hellish Rebuke",
+    "level":1,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 reaction",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"2D10 reaction fire damage with Dex save for half damage. Add 1D10 per spell slot lvl. "
+  },
+  {
+    "name":"Hex",
+    "level":1,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"90 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Curse target causing an extra 1D6 necrotic damage."
+  },
+  {
+    "name":"Identify",
+    "level":1,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":"Knowledge",
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 object",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":true,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S,M,100gp",
+    "scales":false,
+    "description":"Identify magic item"
+  },
+  {
+    "name":"Illusory Script",
+    "level":1,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 object",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":true,
+    "duration":"10 days",
+    "range":"Touch",
+    "components":"S,M,10gp",
+    "scales":false,
+    "description":"Write a hidden message"
+  },
+  {
+    "name":"Inflict Wounds",
+    "level":1,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":true,
+    "description":"Deal 3D10 Necrotic damage using a melee spell attack. Add 1D10 per spell slot lvl."
+  },
+  {
+    "name":"Jump",
+    "level":1,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Triple jump distance"
+  },
+  {
+    "name":"Longstrider",
+    "level":1,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Increase target's speed by 10"
+  },
+  {
+    "name":"Mage Armor",
+    "level":1,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"1 willing creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"8 hours",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"target's base AC becomes 13"
+  },
+  {
+    "name":"Magic Missile",
+    "level":1,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 or more creatures",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Three darts of 1D4 + 1 Force damage. Add 1 more dart per spell slot lvl used."
+  },
+  {
+    "name":"Ray of Sickness",
+    "level":1,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"2D8 poison damage. Poisons on failed Con save. Add 1D8 per spell slot lvl."
+  },
+  {
+    "name":"Sanctuary",
+    "level":1,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":"Devotion",
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"1 creature",
+    "casting_time":"1 bonus action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Ward a creature against attack"
+  },
+  {
+    "name":"Shield",
+    "level":1,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 reaction",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 round",
+    "range":"Self",
+    "components":"V,S",
+    "scales":false,
+    "description":"Gain +5 AC and take no damage from Magic Missile"
+  },
+  {
+    "name":"Silent Image",
+    "level":1,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create illusionary object"
+  },
+  {
+    "name":"Sleep",
+    "level":1,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":"Archfey",
+        "wizard":true
+    },
+    "type":"Charm",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"90 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Charm creatures to sleep"
+  },
+  {
+    "name":"Speak with Animals",
+    "level":1,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":"Nature",
+        "druid":true,
+        "paladin":"Ancients",
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":true,
+    "duration":"10 minutes",
+    "range":"Self",
+    "components":"V,S",
+    "scales":false,
+    "description":"You can speak with animals"
+  },
+  {
+    "name":"Tasha's Hideous Laughter",
+    "level":1,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":"Great Old One",
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Distract target by making it laugh"
+  },
+  {
+    "name":"Tenser's Floating Disk",
+    "level":1,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Summon",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":true,
+    "duration":"1 hour",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create a disk to carry loads"
+  },
+  {
+    "name":"Thunderwave",
+    "level":1,
+    "school":"Evocation",
+    "class_list": {
+        "bard":true,
+        "cleric":"Tempest",
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Self",
+    "components":"V,S",
+    "scales":true,
+    "description":"Area of effect thunder damage (2D8) and 10ft push. Add 1D8 for each higher spell slot lvl"
+  },
+  {
+    "name":"Unseen Servant",
+    "level":1,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Summon",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":true,
+    "duration":"1 hour",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create an invisible servant for simple tasks"
+  },
+  {
+    "name":"Witch Bolt",
+    "level":1,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"ranged spell attack for 1D12 lightning damage. On your next turn, use your action to do 1D12 again. Add 1D12 for each higher spell slot lvl."
+  },
+  {
+    "name":"Alter Self",
+    "level":2,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":false,
+    "description":"Alter own body"
+  },
+  {
+    "name":"Animal Messenger",
+    "level":2,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":true,
+    "duration":"1 day",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Use animal as messenger"
+  },
+  {
+    "name":"Arcane Lock",
+    "level":2,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 object",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"permanent",
+    "range":"Touch",
+    "components":"V,S,M,25gp",
+    "scales":false,
+    "description":"Seal a door, chest or lock"
+  },
+  {
+    "name":"Augury",
+    "level":2,
+    "school":"Divination",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":true,
+    "duration":"instantaneous",
+    "range":"Self",
+    "components":"V,S,M,25gp",
+    "scales":false,
+    "description":"Consult with otherworldly entities"
+  },
+  {
+    "name":"Barkskin",
+    "level":2,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"1 willing creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"target's AC can't be less than 16"
+  },
+  {
+    "name":"Beast Sense",
+    "level":2,
+    "school":"Divination",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"1 willing beast",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":true,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"S",
+    "scales":false,
+    "description":"See through beast's eyes"
+  },
+  {
+    "name":"Blindness/Deafness",
+    "level":2,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":"Fiend",
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V",
+    "scales":true,
+    "description":"Blind or Deafen a foe"
+  },
+  {
+    "name":"Blur",
+    "level":2,
+    "school":"Illusion",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":"Desert",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V",
+    "scales":false,
+    "description":"Enemies have disadvantage on attack rolls"
+  },
+  {
+    "name":"Calm Emotions",
+    "level":2,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":"Archfey",
+        "wizard":false
+    },
+    "type":"Charm",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Surpress charmed/frightened "
+  },
+  {
+    "name":"Cloud of Daggers",
+    "level":2,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"4D4 AoE slashing damage. Add 2D4 per spell slot lvl."
+  },
+  {
+    "name":"Continual Flame",
+    "level":2,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 object",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"permanent",
+    "range":"Touch",
+    "components":"V,S,M,50gp",
+    "scales":false,
+    "description":"Create a permanent flame"
+  },
+  {
+    "name":"Cordon of Arrows",
+    "level":2,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Guarding",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"8 hours",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Guard an area with 4 arrows"
+  },
+  {
+    "name":"Crown of Madness",
+    "level":2,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Charm",
+    "target":"1 humanoid",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Charm a person"
+  },
+  {
+    "name":"Darkness",
+    "level":2,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":"Swamp",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"60 feet",
+    "components":"V,M",
+    "scales":false,
+    "description":"Create magical darkness"
+  },
+  {
+    "name":"Darkvision",
+    "level":2,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"1 willing creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"8 hours",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Give a target darkvision"
+  },
+  {
+    "name":"Aid",
+    "level":2,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"2 or more creatures",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"8 hours",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"HP buff for 5hp. +5hp per spell slot lvl"
+  },
+  {
+    "name":"Branding Smite",
+    "level":2,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V",
+    "scales":true,
+    "description":"Smite for 2D6 extra radiant damage and anti-invisibility. Add 1D6 per spell slot lvl."
+  },
+  {
+    "name":"Find Steed",
+    "level":2,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Summon",
+    "target":"Self",
+    "casting_time":"10 minutes",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"30 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Summon a mount"
+  },
+  {
+    "name":"Hold Person",
+    "level":2,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":"Vengeance",
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 humanoid",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Paralyze target (Wis saving throw negates)"
+  },
+  {
+    "name":"Lesser Restoration",
+    "level":2,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":true,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":false,
+    "description":"Remove blindness, deafness, paralyzed, poisoned, diseased"
+  },
+  {
+    "name":"Detect Thoughts",
+    "level":2,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":"Great Old One",
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Detect Thoughts"
+  },
+  {
+    "name":"Locate Object",
+    "level":2,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":true,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"1000 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Learn location of an object"
+  },
+  {
+    "name":"Magic Weapon",
+    "level":2,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"1 weapon",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":false,
+    "description":"Make a weapon a +1 magical weapon"
+  },
+  {
+    "name":"Misty Step",
+    "level":2,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":"Coast",
+        "paladin":"Ancients, Vengeance",
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 bonus action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"30 feet",
+    "components":"V",
+    "scales":false,
+    "description":"Teleport 30 feet"
+  },
+  {
+    "name":"Protection from Poison",
+    "level":2,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":true,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":false,
+    "description":"Protect against or neutralize poison"
+  },
+  {
+    "name":"Zone of Truth",
+    "level":2,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Create an area in which no lies can be told"
+  },
+  {
+    "name":"Enhance Ability",
+    "level":2,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Increase scores for saves and checks"
+  },
+  {
+    "name":"Enlarge/Reduce",
+    "level":2,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Enlarge or reduce a target"
+  },
+  {
+    "name":"Enthrall",
+    "level":2,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":false
+    },
+    "type":"Debuff",
+    "target":"choose in range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Distract creature"
+  },
+  {
+    "name":"Find Traps",
+    "level":2,
+    "school":"Divination",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Sense traps, glyphs etc."
+  },
+  {
+    "name":"Flame Blade",
+    "level":2,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Summon",
+    "target":"Self",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"Self",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Summon a 3D6 fiery blade (melee, fire damage). Add 1D6 per two spell slot lvls. "
+  },
+  {
+    "name":"Flaming Sphere",
+    "level":2,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Create a flaming sphere that moves and damages for 2D6 with Dex save for half damage. Add 1D6 per spell slot lvl."
+  },
+  {
+    "name":"Gentle Repose",
+    "level":2,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 dead creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":true,
+    "duration":"10 days",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Stop corpse decay and prevent it from becominutesg undead"
+  },
+  {
+    "name":"Gust of Wind",
+    "level":2,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create strong wind"
+  },
+  {
+    "name":"Heat Metal",
+    "level":2,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 object",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Heat up metal objects"
+  },
+  {
+    "name":"Invisibility",
+    "level":2,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":"Grassland",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Make target invisible"
+  },
+  {
+    "name":"Knock",
+    "level":2,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 object",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V",
+    "scales":false,
+    "description":"Open a door, chest, lock etc."
+  },
+  {
+    "name":"Levitate",
+    "level":2,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Levitate a creature or object"
+  },
+  {
+    "name":"Locate Animals or Plants",
+    "level":2,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":true,
+    "duration":"instantaneous",
+    "range":"5 miles",
+    "components":"V,S,m",
+    "scales":false,
+    "description":"Learn location of an animal or plant"
+  },
+  {
+    "name":"Magic Mouth",
+    "level":2,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 object",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":true,
+    "duration":"permanent",
+    "range":"30 feet",
+    "components":"V,S,M,10gp",
+    "scales":false,
+    "description":"Implant a message in an object"
+  },
+  {
+    "name":"Melf's Acid Arrow",
+    "level":2,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":"Swamp",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"90 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"4D4 acid damage immediately and 2D4 acid damage at end of turn. Half immediate damage at miss. Add 1D4 per spell slot lvl used."
+  },
+  {
+    "name":"Mirror Image",
+    "level":2,
+    "school":"Illusion",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":"Coast",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V,S",
+    "scales":false,
+    "description":"Create illusionary duplicates"
+  },
+  {
+    "name":"Moonbeam",
+    "level":2,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":"Ancients",
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"120 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Create a damaging beam of light 2D10 damage, Con save for half. Add 1D10 per spell slot lvl used."
+  },
+  {
+    "name":"Nystul's Magic Aura",
+    "level":2,
+    "school":"Illusion",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 object",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 day",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create false magic item or shroud a magical item from detection"
+  },
+  {
+    "name":"Pass without Trace",
+    "level":2,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"party",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Self",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Mask traces of passage"
+  },
+  {
+    "name":"Phantasmal Force",
+    "level":2,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":"Archfey, Great Old One",
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create illusions with real effects"
+  },
+  {
+    "name":"Prayer of Healing",
+    "level":2,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"up to six",
+    "casting_time":"10 minutes",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"30 feet",
+    "components":"V",
+    "scales":true,
+    "description":"Heal a group for 2D8 + spellcasting modifier. Add 1D8 per spell slot lvl used. "
+  },
+  {
+    "name":"Ray of Enfeeblement",
+    "level":2,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Debuff Strength based attacks"
+  },
+  {
+    "name":"Rope Trick",
+    "level":2,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create extradimensional shelter"
+  },
+  {
+    "name":"Scorching Ray",
+    "level":2,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":"Fiend",
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"3 rays for 2D6 fire damage each. Add one ray for each higher spell slot used. "
+  },
+  {
+    "name":"See Invisibility",
+    "level":2,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Self",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"See invisible creatures"
+  },
+  {
+    "name":"Shatter",
+    "level":2,
+    "school":"Evocation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"3D8 thunder damage or half on Con save. Add 1D8 for each higher spell slot used."
+  },
+  {
+    "name":"Silence",
+    "level":2,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":"Desert",
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":true,
+    "duration":"10 minutes",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Create 20-foot zone of magical silence"
+  },
+  {
+    "name":"Spider Climb",
+    "level":2,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":"Forest, Mountain, Underdark",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 willing creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Walk on walls or ceilings, increase climb speed"
+  },
+  {
+    "name":"Spike Growth",
+    "level":2,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Guarding",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"150 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create area of difficult terrain which damages"
+  },
+  {
+    "name":"Spiritual Weapon",
+    "level":2,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"In range",
+    "casting_time":"1 bonus action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Create a spectral weapon which attacks for 1D8 + spellcasting modifier."
+  },
+  {
+    "name":"Suggestion",
+    "level":2,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Charm",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"8 hours",
+    "range":"30 feet",
+    "components":"V,M",
+    "scales":false,
+    "description":"Charm a person into doing something"
+  },
+  {
+    "name":"Warding Bond",
+    "level":2,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"1 willing creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S,M,100gp",
+    "scales":false,
+    "description":"Protect (+1AC and resistance) and divide damage (each takes half)"
+  },
+  {
+    "name":"Web",
+    "level":2,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":"Underdark",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create difficult and obscured terrain"
+  },
+  {
+    "name":"Animate Dead",
+    "level":3,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Summon",
+    "target":"1 dead creature",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"10 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Create a skeleton or zombie"
+  },
+  {
+    "name":"Beacon of Hope",
+    "level":3,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":"Devotion",
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"any in range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Give advantage on Wis and Death saving throws, creatures gain max hitpoints from healing"
+  },
+  {
+    "name":"Bestow Curse",
+    "level":3,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":true,
+    "description":"Curse target for one of multiple effects: disadvantage on checks, attack roles etc."
+  },
+  {
+    "name":"Blink",
+    "level":3,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":"Trickery",
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":"Archfey",
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V,S",
+    "scales":false,
+    "description":"Travel to the Ethereal Plane. Return to an unoccpied space in 10 ft."
+  },
+  {
+    "name":"Call Lightning",
+    "level":3,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":"Tempest",
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Create a cloud which strikes for 3D10 lightning damage in a 5-ft range of a point"
+  },
+  {
+    "name":"Clairvoyance",
+    "level":3,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":"Great Old One",
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"10 minutes",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"1 mile",
+    "components":"V,S,M,100gp",
+    "scales":false,
+    "description":"See or hear at a distance"
+  },
+  {
+    "name":"Conjure Animals",
+    "level":3,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Summon",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Summon 2CR worth of beasts which obey you. In 5th lvl slot 4CR, 6CR in 7th, 8CR in 9th."
+  },
+  {
+    "name":"Conjure Barrage",
+    "level":3,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Throw a weapon or ammunition in the air. Copies rain down in a 60 ft cone for 3D8 (Dex save for half)."
+  },
+  {
+    "name":"Counterspell",
+    "level":3,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 reaction",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"S",
+    "scales":true,
+    "description":"Use your reaction to counter a spell being cast. Make DC 10 + spell lvl check if above the spell slot lvl used."
+  },
+  {
+    "name":"Fear",
+    "level":3,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"On failed Wis save, creatures in a 30-foot cone become frightened and flee."
+  },
+  {
+    "name":"Feign Death",
+    "level":3,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 willing creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":true,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"target becomes indistinguishable from death"
+  },
+  {
+    "name":"Aura of Vitality",
+    "level":3,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"one in range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V",
+    "scales":false,
+    "description":"As a bonus action heal one creature in range for 2D6"
+  },
+  {
+    "name":"Fireball",
+    "level":3,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":"Light",
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":"Fiend",
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"150 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Create a fireball for 8D6 damage (Dex save for half). Add 1D6 per higher spell slot lvl used."
+  },
+  {
+    "name":"Fly",
+    "level":3,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 willing creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"target can fly (60 ft speed). target more using higher spell slot lvls."
+  },
+  {
+    "name":"Gaseous Form",
+    "level":3,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":"Underdark",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 willing creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"target takes on the form of a misty cloud and can move as such"
+  },
+  {
+    "name":"Blinding Smite",
+    "level":3,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V",
+    "scales":false,
+    "description":"Smite for 3D8 radiant damage. target is blinded on failed Con save."
+  },
+  {
+    "name":"Glyph of Warding",
+    "level":3,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 object",
+    "casting_time":"1 hour",
+    "concentration":false,
+    "ritual":false,
+    "duration":"permanent",
+    "range":"Touch",
+    "components":"V,S,M,200gp",
+    "scales":true,
+    "description":"Magically protect a chest, door, area, book etc."
+  },
+  {
+    "name":"Create Food and Water",
+    "level":3,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":"Desert",
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"30 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Create 45 pounds of food and 30 gallons of water."
+  },
+  {
+    "name":"Crusader's Mantle",
+    "level":3,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":"War",
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V",
+    "scales":false,
+    "description":"Friendly creatures in range deal an extra 1D4 radiant damage with weapon attacks."
+  },
+  {
+    "name":"Daylight",
+    "level":3,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":true,
+        "ranger":true,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"An object gives of bright light in a 60 ft radius, dim for 60 ft more. Dispells Darkness."
+  },
+  {
+    "name":"Dispel Magic",
+    "level":3,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Dispell a magical effect from a creature, object or place."
+  },
+  {
+    "name":"Hunger of Hadar",
+    "level":3,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"150 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"A magical void appears doing 2D6 Cold damage at begin of turn, and 2D6 acid damage at end of turn (Dex for half damage)."
+  },
+  {
+    "name":"Elemental Weapon",
+    "level":3,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"1 weapon",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":true,
+    "description":"Make a non-magical weapon a +1 magical weapon which deals an additional 1D4 damage."
+  },
+  {
+    "name":"Hypnotic Pattern",
+    "level":3,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Charm",
+    "target":"viewing range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"120 feet",
+    "components":"S,M",
+    "scales":false,
+    "description":"Twisting patterns of color appear, charming those who fail a Wis saving throw."
+  },
+  {
+    "name":"Leomund's Tiny Hut",
+    "level":3,
+    "school":"Evocation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":true,
+    "duration":"8 hours",
+    "range":"Self",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create a comfortable and dry 9-person dome of force"
+  },
+  {
+    "name":"Haste",
+    "level":3,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":"Grassland",
+        "paladin":"Vengeance",
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"1 willing creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"target gains +2 AC, its speed is doubled, advantage on Dex saves, and gains an additional action (1 attack, dash, disengage, hide)"
+  },
+  {
+    "name":"Lightning Arrow",
+    "level":3,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V,S",
+    "scales":true,
+    "description":"Your ranged weapon or ammunition becomes a bolt of lightning doing 4D8 damage on a hit or half on a miss. Add 1D8 for each higher spell slot used."
+  },
+  {
+    "name":"Lightning Bolt",
+    "level":3,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":"Mountain",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"100 foot",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"All creatures in a 100ft, 5ft wide line take 8D6 lightning damage (Dex save for half). Add 1D6 for each higher spell slot used."
+  },
+  {
+    "name":"Magic Circle",
+    "level":3,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"In range",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"10 feet",
+    "components":"V,S,M,100gp",
+    "scales":true,
+    "description":"Create a 10ft radius zone which acts like a Protection from Evil and Good spell. "
+  },
+  {
+    "name":"Protection from Energy",
+    "level":3,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":"Ancients, Vengeance",
+        "ranger":true,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"1 willing creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":false,
+    "description":"Give the target resistance to one of acid, cold, fire, lightning or thunder damage."
+  },
+  {
+    "name":"Remove Curse",
+    "level":3,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Healing",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":false,
+    "description":"Remove a curse from the target or allow it to drop a cursed object"
+  },
+  {
+    "name":"Revivify",
+    "level":3,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"1 dead creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S,M,300gp",
+    "scales":false,
+    "description":"Return a creature that has died in the last minute to life with 1 hp."
+  },
+  {
+    "name":"Major Image",
+    "level":3,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"120 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Create an illusion including sounds, smells and temperature."
+  },
+  {
+    "name":"Mass Healing Word",
+    "level":3,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"up to six",
+    "casting_time":"1 bonus action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V",
+    "scales":true,
+    "description":"Up to six in range gain 1D4 + spellcasting modifier hitpoints. Add 1D4 per spell slot lvl used."
+  },
+  {
+    "name":"Meld into Stone",
+    "level":3,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":true,
+    "duration":"8 hours",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":false,
+    "description":"You merge into a stone object large enough to contain you."
+  },
+  {
+    "name":"Nondetection",
+    "level":3,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":"Knowledge",
+        "druid":false,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"8 hours",
+    "range":"Touch",
+    "components":"V,S,M,25gp",
+    "scales":false,
+    "description":"You magically conceal the target for divination magic and scrying."
+  },
+  {
+    "name":"Phantom Steed",
+    "level":3,
+    "school":"Illusion",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Travel",
+    "target":"In range",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":true,
+    "duration":"1 hour",
+    "range":"30 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"You summon a horse-like creature that can be used a a mount."
+  },
+  {
+    "name":"Plant Growth",
+    "level":3,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":"Nature",
+        "druid":true,
+        "paladin":"Ancients",
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":"Archfey",
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"150 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Make an area become overgrown. When cast over 8 hours enrich land to yield a double harvest."
+  },
+  {
+    "name":"Sending",
+    "level":3,
+    "school":"Evocation",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":"Great Old One",
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 round",
+    "range":"unlimited",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Send a short message to a creature known to you."
+  },
+  {
+    "name":"Sleet Storm",
+    "level":3,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":"Tempest",
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"150 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create a 40ft radius zone of heavy rain and ice which obscures and is difficult terrain. Creates failing a Dex save fall prone."
+  },
+  {
+    "name":"Slow",
+    "level":3,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":"Arctic",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"up to six",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"120 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"up to six in a 40ft cube in range get -2 AC and Dex saves, can't use reactions and lose either their action or bonus action."
+  },
+  {
+    "name":"Speak with Dead",
+    "level":3,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"1 dead creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"10 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Allow a corpse to answer up to five simple questions"
+  },
+  {
+    "name":"Speak with Plants",
+    "level":3,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"30 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Speak with plants in range and give them simple commands"
+  },
+  {
+    "name":"Spirit Guardians",
+    "level":3,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Guarding",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"15 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Summon spirits to protect you. They deal 3D8 damage (half on Wis save). Add 1D8 for each higher spell slot lvl used."
+  },
+  {
+    "name":"Stinking Cloud",
+    "level":3,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":"Swamp, Underdark",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":"Fiend",
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"90 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create a 20ft radius cloud of neauseating gas obscuring the area. On a failed Con save (poison) a creatures in the cloud loses its action."
+  },
+  {
+    "name":"Tongues",
+    "level":3,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,M",
+    "scales":false,
+    "description":"target can understand all spoken languages, all creatures that know a language can understand the target."
+  },
+  {
+    "name":"Vampiric Touch",
+    "level":3,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":true,
+    "description":"Make a melee spell attack for 3D6 necrotic damage. Gain hp equal to half the damage done. Add 1D6 for each higher spell slot lvl used."
+  },
+  {
+    "name":"Water Breathing",
+    "level":3,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"up to ten",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":true,
+    "duration":"1 day",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Give up to ten willing creatures the ability to breathe underwater."
+  },
+  {
+    "name":"Water Walk",
+    "level":3,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"up to ten",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":true,
+    "duration":"1 hour",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Give up to ten willing creatures the ability to move on liquids inc. snow, mud, ice, quicksand etc."
+  },
+  {
+    "name":"Wind Wall",
+    "level":3,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":"Nature",
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Guarding",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"120 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create a wall of wind up to 50 ft long which blocks fog, smoke, medium flying creatures, arrows etc. Creatures in the wall take 3D8 bludgeoning damage (Str save for half)"
+  },
+  {
+    "name":"Arcane Eye",
+    "level":4,
+    "school":"Divination",
+    "class_list": {
+        "bard":false,
+        "cleric":"Knowledge",
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create an invisible, moving (unlimited range, 30ft/round) magic eye through which you can see"
+  },
+  {
+    "name":"Blight",
+    "level":4,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"30 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Deals 8D8 Necrotic damage. Con save for half damage. Add 1D8 per higher spell slot lvl used. Special rules for plants and plant type creatures."
+  },
+  {
+    "name":"Compulsion",
+    "level":4,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Debuff",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Chosen creatures in range are compelled to move in a direction of your choosing."
+  },
+  {
+    "name":"Confusion",
+    "level":4,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":"Knowledge",
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"90 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Each creature in a 10ft radius gets confused. Wis save negates. Targes flee, stand still or randomly attack, see phb."
+  },
+  {
+    "name":"Conjure Minor Elementals",
+    "level":4,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Summon",
+    "target":"In range",
+    "casting_time":"1 minute",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"90 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Summon 2 CR worth of elementals. Summon 4CR when using a 6th lvl spell slot and 6CR using an 8th lvl spell slot. "
+  },
+  {
+    "name":"Conjure Woodland Beings",
+    "level":4,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Summon",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Summon 2 CR worth of fey creatures. Summon 4CR when using a 6th lvl spell slot and 6CR using an 8th lvl spell slot."
+  },
+  {
+    "name":"Control Water",
+    "level":4,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"300 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Control an amount of water in a 100 ft cube. E.g. flood, wave, part etc. See phb for details"
+  },
+  {
+    "name":"Divination",
+    "level":4,
+    "school":"Divination",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":"Forest, Grassland",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":true,
+    "duration":"instantaneous",
+    "range":"Self",
+    "components":"V,S,M,25gp",
+    "scales":false,
+    "description":"Get answer to one specific question concerning a goal, event or activity to occur within the next 7 days."
+  },
+  {
+    "name":"Dominate Beast",
+    "level":4,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":false,
+        "cleric":"Nature",
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":"Archfey, Great Old One",
+        "wizard":false
+    },
+    "type":"Charm",
+    "target":"1 beast",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Charm a beast. Wis saving throw negates. The beast will follow your simple commands. Higher spell slot lvls increase the duration"
+  },
+  {
+    "name":"Evard's Black Tentacles",
+    "level":4,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":"Great Old One",
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"90 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Tentacles fill a 20-foot square area making it difficult terrain. Creates take 3D6 bludgeoning damage and are restrained on failed Dex save."
+  },
+  {
+    "name":"Fabricate",
+    "level":4,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"10 minutes",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Create an object from raw materials (e.g. a box from wood, a rope from hemp). You can not fabricate items for which artisan's tools would have been needed unless you are proficient in their use."
+  },
+  {
+    "name":"Fire Shield",
+    "level":4,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":"Fiend",
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"Self",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create a fiery shield giving resistance to fire or cold damage and damaging attackers for 2D8."
+  },
+  {
+    "name":"Freedom of Movement",
+    "level":4,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":"Devotion",
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"1 willing creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"The target's movement is unaffected by difficult terrain and it can't be paralyzed, restrained, limited in its speed and it can escape restraints"
+  },
+  {
+    "name":"Giant Insect",
+    "level":4,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Summon",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"30 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Transform centipedes, spiders, wasps or scorpions into giant versions that obey your simple commands"
+  },
+  {
+    "name":"Grasping Vine",
+    "level":4,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":"Nature",
+        "druid":true,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Summon",
+    "target":"In range",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Conjure a vine which pulls in a creature you choose for 20ft on a failed Dex save"
+  },
+  {
+    "name":"Greater Invisibility",
+    "level":4,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":"Underdark",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":"Archfey",
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":false,
+    "description":"The target and what it is wearing or carrying becomes invisible until the spell ends (or you drop the carried items)."
+  },
+  {
+    "name":"Guardian of Faith",
+    "level":4,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":"Devotion",
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Guarding",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"8 hours",
+    "range":"30 feet",
+    "components":"V",
+    "scales":false,
+    "description":"A spectral guardian occupies and deals 20 radiant damage to hostile creatures in 10 ft. Vanishes after dealing 60 damage."
+  },
+  {
+    "name":"Hallucinatory Terrain",
+    "level":4,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Area of Effect",
+    "casting_time":"10 minutes",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 day",
+    "range":"300 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Make a 150-foot cube of terrain resemble some other sort of terrain. E.g. a field of grass into a pond or rock."
+  },
+  {
+    "name":"Ice Storm",
+    "level":4,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":"Tempest",
+        "druid":true,
+        "paladin":"Ancients",
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"300 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Creatures in a 20-foot radius cylinder take 2D8 bludgeoning and 4D6 cold damage or half on a succesful Dex save. Are becomes difficult terrain. Add 1D8 bludgeoning per higher spell slot lvl used."
+  },
+  {
+    "name":"Leomund's Secret Chest",
+    "level":4,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 chest",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S,M,5050gp",
+    "scales":false,
+    "description":"Hide a chest (worth 5K GP) and its content in the Ethereal Plane for 60 days.  You can use an action to make it reappear. 5% cumulative chance per day after 60 days that it will be lost forever."
+  },
+  {
+    "name":"Aura of Life",
+    "level":4,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"30 feet",
+    "components":"V",
+    "scales":false,
+    "description":"Create an aura which gives resistance to necrotic damage and heals living creatures at 0 hp to 1 hp."
+  },
+  {
+    "name":"Mordenkainen's Faithful Hound",
+    "level":4,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"8 hours",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"An invisible guarddog protects an area. Can attack for 4D8 piercing damage. The dog can see into the Ethereal plane and ignores illusions."
+  },
+  {
+    "name":"Mordenkainen's Private Sanctum",
+    "level":4,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"In range",
+    "casting_time":"10 minutes",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 day",
+    "range":"120 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Protect an area against sounds, vision, divination, teleport, planar travel."
+  },
+  {
+    "name":"Otiluke's Resilient Sphere",
+    "level":4,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"An indestructible sphere enccompasses a creature (Dex saving throws prevents capture) and keeps it for the duration ."
+  },
+  {
+    "name":"Phantasmal Killer",
+    "level":4,
+    "school":"Illusion",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"You frighten a creature by creating illusions. (Wis saving throw negates). At the start of each of its turns, it takes 4D10 pschic damage (Wis save negates)"
+  },
+  {
+    "name":"Polymorph",
+    "level":4,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":"Trickery",
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Transform a creature into some other shape. (Unwilling can save on Wis saving throw). See PHB for rules about types of transformations"
+  },
+  {
+    "name":"Aura of Purity",
+    "level":4,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"30 feet",
+    "components":"V",
+    "scales":false,
+    "description":"Create an aura which gives immunity to disease, resistance to poison and advantage on saving throws vs blind, charm, deaf, fright, paralyze, poison, stun."
+  },
+  {
+    "name":"Banishment",
+    "level":4,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Banish one creature to another plane. target's Cha saving throw negates. targets more at higher levels"
+  },
+  {
+    "name":"Death Ward",
+    "level":4,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"8 hours",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":false,
+    "description":"The first time the target would drop to 0 hit points, it drops to 1 hp instead. "
+  },
+  {
+    "name":"Dimension Door",
+    "level":4,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":"Trickery",
+        "druid":false,
+        "paladin":"Vengeance",
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"500 feet",
+    "components":"V",
+    "scales":false,
+    "description":"Teleport yourself and up to 1 willing creature up to 500 feet to a place you can see, specify or describe."
+  },
+  {
+    "name":"Locate Creature",
+    "level":4,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":true,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"1000 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Sense the direction to a specific creature's location and know its movement."
+  },
+  {
+    "name":"Staggering Smite",
+    "level":4,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V",
+    "scales":false,
+    "description":"The next time you hit a creature with a melee attack, deal an extra 4D6 psychic damage. On a failed Wis save, it also disadvantage on checks and attacks and can't use reactions"
+  },
+  {
+    "name":"Stone Shape",
+    "level":4,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 stone object",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Form a piece of stone up to 5ft in any dimension in any shape as if it were clay. "
+  },
+  {
+    "name":"Stoneskin",
+    "level":4,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":"War",
+        "druid":true,
+        "paladin":"Ancients",
+        "ranger":true,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S,M,100gp",
+    "scales":false,
+    "description":"Turns flesh as hard as stone granting resistance to nonmagical melee damage."
+  },
+  {
+    "name":"Wall of Fire",
+    "level":4,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":"Light",
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":"Fiend",
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"120 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Create a wall of fire dealing 5D8 fire damage (half on Dex save) each turn to creatures on one side of the wall."
+  },
+  {
+    "name":"Animate Objects",
+    "level":5,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Summon",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Animate up to ten nonmagical objects not being worn or carried.They obey your simple commands. See PHB for stats"
+  },
+  {
+    "name":"Antilife Shell",
+    "level":5,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Self",
+    "components":"V,S",
+    "scales":false,
+    "description":"Create an 10-ft aura only undead and constructs can pass through."
+  },
+  {
+    "name":"Awaken",
+    "level":5,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Summon",
+    "target":"1 beast or plant",
+    "casting_time":"8 hours",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S,M,1000gp",
+    "scales":false,
+    "description":"Give a beast or plant an int of 10 and allow it to move freely. For 30 days it will follow your commands after which it may or may not leave"
+  },
+  {
+    "name":"Bigby's Hand",
+    "level":5,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Summon",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"120 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Create a magical hand which can attack, push, grapple or shield you."
+  },
+  {
+    "name":"Cloudkill",
+    "level":5,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":"Underdark",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Create a poisonous cloud of fog dealing 5D8 poison damage (Con save for half damage). The covered area becomes difficult terrain. Add 1D8 per higher spell slot lvl used."
+  },
+  {
+    "name":"Commune",
+    "level":5,
+    "school":"Divination",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":"Devotion",
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":true,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Ask up to three yes/no questions to your deity or a devine proxy"
+  },
+  {
+    "name":"Commune with Nature",
+    "level":5,
+    "school":"Divination",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":"Ancients",
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":true,
+    "duration":"instantaneous",
+    "range":"Self",
+    "components":"V,S",
+    "scales":false,
+    "description":"Gain knowledge about natural features in 3 miles, such as bodies of water, undead or plantlife. "
+  },
+  {
+    "name":"Cone of Cold",
+    "level":5,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":"Arctic",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Deal 8D8 cold damage to creatures in a 60-ft cone (Con save for half damage). Add 1D8 per higher spell slot lvl used"
+  },
+  {
+    "name":"Conjure Elemental",
+    "level":5,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Summon",
+    "target":"In range",
+    "casting_time":"1 minute",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"90 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Call forth a CR 5 elemental servant which obeys your commands. It breaks free and becomes hostile if your concentration is broken."
+  },
+  {
+    "name":"Conjure Volley",
+    "level":5,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"15 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Summon a volley of ammunition or thrown weapons. Deals 8D8 damage in a 40-ft radius (Half on Dex save)."
+  },
+  {
+    "name":"Contact other Plane",
+    "level":5,
+    "school":"Divination",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":true,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V",
+    "scales":false,
+    "description":"Contact an extraplanar entity and ask it up to 5 questions that can be answered with one word."
+  },
+  {
+    "name":"Contagion",
+    "level":5,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"7 days",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":false,
+    "description":"Make a melee spell attack. On a hit, the creature is infected with a disease. See PHB for details"
+  },
+  {
+    "name":"Creation",
+    "level":5,
+    "school":"Illusion",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":false,
+    "duration":"special",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Create a nonliving object up to a 5-ft ccube of vegetable matter, stone, metal, gems or rare metals."
+  },
+  {
+    "name":"Dominate Person",
+    "level":5,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":"Trickery",
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":"Archfey, Great Old One",
+        "wizard":true
+    },
+    "type":"Charm",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Charm a person on a failed Wis save. It obeys your commands. At higher levels the duration is increased."
+  },
+  {
+    "name":"Dream",
+    "level":5,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":"Grassland",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Charm",
+    "target":"1 creature",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":false,
+    "duration":"8 hours",
+    "range":"Special",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Enter a target's dreams, manifesting as a mesenger with who the target can communicate"
+  },
+  {
+    "name":"Flame Strike",
+    "level":5,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":"Devotion",
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":"Fiend",
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Each target in a 10foot radius takes 4D6 fire and 4D6 radiant damage. Half on Dex save. Increase either fire or radiant damage with 1D6 for each higher spell slot lvl"
+  },
+  {
+    "name":"Greater Restoration",
+    "level":5,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S,M,100gp",
+    "scales":false,
+    "description":"Reduce exhaustion, end charm, petrify, curse, stat or hp reduction"
+  },
+  {
+    "name":"Hallow",
+    "level":5,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":"Fiend",
+        "wizard":false
+    },
+    "type":"Guarding",
+    "target":"Area of Effect",
+    "casting_time":"24 hours",
+    "concentration":false,
+    "ritual":false,
+    "duration":"permanent",
+    "range":"Touch",
+    "components":"V,S,M,1000gp",
+    "scales":false,
+    "description":"Infuse an area up to 60ft in diameter with protection against celestials, elementals, fey, fiend and undead. Add additional effects, see PHB."
+  },
+  {
+    "name":"Insect Plague",
+    "level":5,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"300 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Deals 4D10 damage (Con save for half damage)  to targets  in a 20-ft radius sphere. Area becomes lightly obscured and difficult terrain. Add 1D10 per higher spell slot lvl used."
+  },
+  {
+    "name":"Legend Lore",
+    "level":5,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 item",
+    "casting_time":"10 minutes",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Self",
+    "components":"V,S,M,250gp",
+    "scales":false,
+    "description":"Name or describe a person, place or object. You learn a summary of the lore involved with it."
+  },
+  {
+    "name":"Mass Cure Wounds",
+    "level":5,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"up to six",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"targets in a 30ft radius sphere are healed for 3D8 + spellcasting modifier. Add 1D8 for each higher spell slot lvl used. "
+  },
+  {
+    "name":"Mislead",
+    "level":5,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Self",
+    "components":"S",
+    "scales":false,
+    "description":"Become invisible and create an illusionary duplicate of yourself which you can move and through which senses you can see and hear. "
+  },
+  {
+    "name":"Modify Memory",
+    "level":5,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":"Trickery",
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Charm a person (Wis save) and alter their memory of the past. See PHB for details."
+  },
+  {
+    "name":"Passwall",
+    "level":5,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":"Mountain",
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create a passage (max. 5ft wide, 8ft tall, 20ft deep) in a wooden, plaster or stone surface. "
+  },
+  {
+    "name":"Planar Binding",
+    "level":5,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Summon",
+    "target":"celestial/elemental/fey/fiend",
+    "casting_time":"1 hour",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 day",
+    "range":"60 feet",
+    "components":"V,S,M,1000gp",
+    "scales":true,
+    "description":"Bind an extraplanar creature to follow your instructions."
+  },
+  {
+    "name":"Rary's Telepathic Bond",
+    "level":5,
+    "school":"Divination",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"up to eight creatures",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":true,
+    "duration":"1 hour",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Forge a telepathic bond between all creatures of yor choice. All targets can communicate telepathically."
+  },
+  {
+    "name":"Reincarnate",
+    "level":5,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"1 dead humanoid",
+    "casting_time":"1 hour",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S,M,1000gp",
+    "scales":false,
+    "description":"Return a creature dead for 10 days or less to life in a new body (DM chooses race). The target retains its capabilities and experiences but racial stats change."
+  },
+  {
+    "name":"Banishing Smite",
+    "level":5,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V",
+    "scales":false,
+    "description":"The next time you hit a creature with a melee attack, deal an extra 5D10 force damage. If this reduces the target's hp to below 50, banish it. "
+  },
+  {
+    "name":"Circle of Power",
+    "level":5,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"Self",
+    "components":"V",
+    "scales":true,
+    "description":"Create a 30-ft aura which gives friendly creatures in range advantage on saving throws against spell and magical effects."
+  },
+  {
+    "name":"Destructive Wave",
+    "level":5,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":"Tempest",
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"30 feet",
+    "components":"V",
+    "scales":false,
+    "description":"Each creature you choose in a 30ft radius takes 5D6 thunder and 5D6 radiant or necrotic damage and is knocked prone (Con save for half damage and no prone)"
+  },
+  {
+    "name":"Seeming",
+    "level":5,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":"Archfey",
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"any in range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"8 hours",
+    "range":"30 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Disguise any number of creatures by changing their physical appearance. Unwilling targets can make a Cha save to be unaffected."
+  },
+  {
+    "name":"Dispel Evil and Good",
+    "level":5,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Celestials, elementals, fey, fiends and undead have disadvantage on attacks. Use touch to break charm, fright, or possession. Banish using melee spell attack"
+  },
+  {
+    "name":"Geas",
+    "level":5,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Charm",
+    "target":"1 creature",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":false,
+    "duration":"30 days",
+    "range":"60 feet",
+    "components":"V",
+    "scales":true,
+    "description":"Charm a creature. It obeys your commands or takes 5D10 psychic damage. Higher spell slots increase the duration."
+  },
+  {
+    "name":"Swift Quiver",
+    "level":5,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 bonus action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Makes your quiver produce an endless supply of non-magical ammunition for the duration of the spell. The ammunition dissapears when the spell ends."
+  },
+  {
+    "name":"Telekinesis",
+    "level":5,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":"Great Old One",
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 creature or object",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"You gain telekinetic powers and can move and manipulate creatures and objects in range. See PHB for details."
+  },
+  {
+    "name":"Teleportation Circle",
+    "level":5,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Travel",
+    "target":"Area of Effect",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 round",
+    "range":"10 feet",
+    "components":"V,M,50gp",
+    "scales":false,
+    "description":"Create a circle you can use as a teleport to another teleportation circle. Casting one on the same location each day for a year makes it permanent."
+  },
+  {
+    "name":"Hold Monster",
+    "level":5,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":"War",
+        "druid":false,
+        "paladin":"Vengeance",
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"90 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Paralyze target creature (Wis saving throw negates). targets more when using higher lvl spell slots."
+  },
+  {
+    "name":"Tree Stride",
+    "level":5,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":"Nature",
+        "druid":true,
+        "paladin":"Ancients",
+        "ranger":true,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"Self",
+    "components":"V,S",
+    "scales":false,
+    "description":"Transport yourself through a tree to another tree of the same kind within 500 ft. "
+  },
+  {
+    "name":"Wall of Force",
+    "level":5,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"120 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create a wall of force of ten 10ftx10ft panels which is immune to all damage and can't be dispelled (disintegrate does destroy it)."
+  },
+  {
+    "name":"Wall of Stone",
+    "level":5,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"120 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create a wall of stone of ten 10ftx10ft panels. The wall must connect with existing stone. The wall can be destroyed. Maintaining concentration for 10min makes the wall permanent."
+  },
+  {
+    "name":"Raise Dead",
+    "level":5,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":false,
+        "paladin":true,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"1 dead creature",
+    "casting_time":"1 hour",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S,M,500gp",
+    "scales":false,
+    "description":"Return a creature that has died in the last 10 days to life with 1 hp. This does not restore missing body parts etc."
+  },
+  {
+    "name":"Scrying",
+    "level":5,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":"Vengeance",
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 particular creature",
+    "casting_time":"10 minutes",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"unlimited",
+    "components":"V,S,M,1000gp",
+    "scales":false,
+    "description":"See and hear through a invisible globe created near the targeted create. See PHB. "
+  },
+  {
+    "name":"Arcane Gate",
+    "level":6,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"500 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Create linked teleportation portals through which you can travel."
+  },
+  {
+    "name":"Blade Barrier",
+    "level":6,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Guarding",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"90 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Create a wall of swords that deals 6D10 damage (Dex save for half) to anyone who tries to cross or enter it."
+  },
+  {
+    "name":"Chain Lightning",
+    "level":6,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"150 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Create a chained lightning bolt (10D8, Dex save for half) that shoots from one target to up to three others."
+  },
+  {
+    "name":"Circle of Death",
+    "level":6,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"150 feet",
+    "components":"V,S,M,500gp",
+    "scales":true,
+    "description":"All creatures in a 60ft radius take 8D6 Necrotic damage (Con save for half). Add 2D6 damage for each higher spell slot used."
+  },
+  {
+    "name":"Conjure Fey",
+    "level":6,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":false
+    },
+    "type":"Summon",
+    "target":"In range",
+    "casting_time":"1 minute",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"90 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Summon a CR6 Fey creature which obeys your commands that don't violate its alignment. "
+  },
+  {
+    "name":"Contingency",
+    "level":6,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"10 minutes",
+    "concentration":false,
+    "ritual":false,
+    "duration":"10 days",
+    "range":"Self",
+    "components":"V,S,M,1500gp",
+    "scales":false,
+    "description":"Prepare another spell you can cast to activate when some condition is met. "
+  },
+  {
+    "name":"Create Undead",
+    "level":6,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Summon",
+    "target":"up to three corpses",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"10 feet",
+    "components":"V,S,M,150gp/ghoul",
+    "scales":true,
+    "description":"Create up to three ghouls which obey your commands"
+  },
+  {
+    "name":"Disintegrate",
+    "level":6,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 creature or object",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"target takes 10D6 + 40 force damage. If this reduces its HP to 0, the target is disintegrated. Destroys objects such as Wall of Force. Add 3D6 for each higher spell slot used."
+  },
+  {
+    "name":"Drawmij's Instant Summons",
+    "level":6,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 object",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":true,
+    "duration":"permanent",
+    "range":"Touch",
+    "components":"V,S,M,1000gp",
+    "scales":false,
+    "description":"Link the target object to a sapphire. Any time thereafter as an action you can cruch the sapphire to summon the object."
+  },
+  {
+    "name":"Eyebite",
+    "level":6,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Make a target you see falll asleep, become frightened or sickened."
+  },
+  {
+    "name":"Find the Path",
+    "level":6,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 day",
+    "range":"unlimited",
+    "components":"V,S,M,100gp",
+    "scales":false,
+    "description":"Know the shortest path to a location you are familiar with."
+  },
+  {
+    "name":"Flesh to Stone",
+    "level":6,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Turn a target's flesh to stone. target must make a Con save or be restrained. After that, if it fails 3 more saving throws, it becomes petrified."
+  },
+  {
+    "name":"Forbiddance",
+    "level":6,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Guarding",
+    "target":"Area of Effect",
+    "casting_time":"10 minutes",
+    "concentration":false,
+    "ritual":true,
+    "duration":"1 day",
+    "range":"Touch",
+    "components":"V,S,M,1000gp",
+    "scales":false,
+    "description":"Guard an area against extraplanar travel and damage creatures trying too enter the area unless they know the password."
+  },
+  {
+    "name":"Globe of Invulnerability",
+    "level":6,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"10 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Create an invulnerable sphere which protects you from spells cast at one or more spell levels lower. "
+  },
+  {
+    "name":"Guards and Wards",
+    "level":6,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"Area of Effect",
+    "casting_time":"10 minutes",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 day",
+    "range":"Touch",
+    "components":"V,S,M,10gp",
+    "scales":false,
+    "description":"Protect an area with an assortment of effects including fog, illusions and locks. See PHB."
+  },
+  {
+    "name":"Harm",
+    "level":6,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Disease a target for 14D6 necrotic damage (Con save for half damage). This does not reduce the target's HP below 0."
+  },
+  {
+    "name":"Heal",
+    "level":6,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Heal a target for 70 hp and cure blindness, deafness and diseases. Add 10hp for each higher spell slot level used."
+  },
+  {
+    "name":"Heroes' Feast",
+    "level":6,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"10 minutes",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"30 feet",
+    "components":"V,S,M,1000gp",
+    "scales":false,
+    "description":"Create a feast which feeds up to 12 additional people and which cures disease and poisons, increases HP and gives immunity to being frightened."
+  },
+  {
+    "name":"Magic Jar",
+    "level":6,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":false,
+    "duration":"permanent",
+    "range":"Touch",
+    "components":"V,S,M,500gp",
+    "scales":false,
+    "description":"Transport your soul into a container from which you can observe your surroundings and attempt to posses humanoids. "
+  },
+  {
+    "name":"Mass Suggestion",
+    "level":6,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"up to 12 creatures",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 day",
+    "range":"60 feet",
+    "components":"V,M",
+    "scales":false,
+    "description":"Like suggestion but targets up to 12 humanoids. "
+  },
+  {
+    "name":"Move Earth",
+    "level":6,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"2 hours",
+    "range":"120 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Transform the soil and ground in a 40ftx40ft area into new shapes, e.g. dig a trench or form a wall. You can change the target area every 10mins."
+  },
+  {
+    "name":"Otiluke's Freezing Sphere",
+    "level":6,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"300 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create a sphere of cold energy which detonates in a 60ft radius for 10D6 cold damage. (Con save for half damage). The sphere can be kept for a short period for later use. Freezes water it comes into contact with."
+  },
+  {
+    "name":"Otto's Irresistable Dance",
+    "level":6,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 feet",
+    "components":"V",
+    "scales":false,
+    "description":"They can dance if you want to, they can leave their Dex behind. Cause if they don't Will save then they will dance if they're no friend of mine."
+  },
+  {
+    "name":"Planar Ally",
+    "level":6,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Summon",
+    "target":"Self",
+    "casting_time":"10 minutes",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Ask a god or similar cosmic entity for aid. It will send a celestial, elemental or fiend to a location near you. You can negiotiate with the being for any sort of aid or assistence. See PHB for details."
+  },
+  {
+    "name":"Programmed Illusion",
+    "level":6,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"permanent",
+    "range":"120 feet",
+    "components":"V,S,M,25gp",
+    "scales":false,
+    "description":"Create an illusion that remains hidden untill some specific condition has been met."
+  },
+  {
+    "name":"Sunbeam",
+    "level":6,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Each creature in a 5ft wide, 60ft long line from your hand takes 6D8 radiant damage and is blinded (Con save for half damage and no blind). Use action to create a new line  of effect."
+  },
+  {
+    "name":"Transport via Plants",
+    "level":6,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Travel",
+    "target":"1 Large plant",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 round",
+    "range":"10 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Transport to another plant on the same plane that you have previously touched by entering the target Large plant."
+  },
+  {
+    "name":"True Seeing",
+    "level":6,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S,M,25gp",
+    "scales":false,
+    "description":"Gives the target truesight (120ft). It can see through illusions, see hidden doors, and see into the ethereal plane. "
+  },
+  {
+    "name":"Wall of Ice",
+    "level":6,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"120 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Create a wall of ice. It can be destroyed but creatures passing through a breach take 5D6 cold damage (Con save for half ). "
+  },
+  {
+    "name":"Wall of Thorns",
+    "level":6,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Guarding",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"120 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Create a wall of thorny brush, blocking sight.  Deals 7D8 slashing damage on contact. (Dex save fof half)."
+  },
+  {
+    "name":"Wind Walk",
+    "level":6,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Up to 10 creatures",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":false,
+    "duration":"8 hours",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"You and up to 10 willing creatures assume gaseous form, allowing for a flight speed up to 300ft/round."
+  },
+  {
+    "name":"Word of Recall",
+    "level":6,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Travel",
+    "target":"Up to 5 creatures",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"unlimited",
+    "components":"V",
+    "scales":false,
+    "description":"Transport yourself and up to 5 willing creatures within 5ft to a prepared, designated sanctuary. "
+  },
+  {
+    "name":"Conjure Celestial",
+    "level":7,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Summon",
+    "target":"In range",
+    "casting_time":"1 minute",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"90 feet",
+    "components":"V,S",
+    "scales":true,
+    "description":"Summon a CR4 Celestial which obeys your commands if they do not go against its alignment."
+  },
+  {
+    "name":"Delayed Blast Fireball",
+    "level":7,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"150 feet",
+    "components":"V,S,M",
+    "scales":true,
+    "description":"Create a glowing bead which can explode for 12D6 fire damage (Dex save for half) and gains 1D6 of damage per round."
+  },
+  {
+    "name":"Divine Word",
+    "level":7,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Debuff",
+    "target":"any in range",
+    "casting_time":"1 bonus action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"30 feet",
+    "components":"V",
+    "scales":false,
+    "description":"Deafen, blind, stun or kill (effect  depends on current target HP) any number of targets in range (Cha save prevents). Returns celestial, elemental, fey and fiends to their normal plane."
+  },
+  {
+    "name":"Etherealness",
+    "level":7,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"8 hours",
+    "range":"Self",
+    "components":"V,S",
+    "scales":true,
+    "description":"Phase into the ethereal plane and be able to move while still being able to perceive the normal plane."
+  },
+  {
+    "name":"Finger of Death",
+    "level":7,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Deal 7D8 + 30 necrotic damage (Con save for half). A creature that dies by this becomes a zombie under your command."
+  },
+  {
+    "name":"Fire Storm",
+    "level":7,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"150 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Produce ten 10ft cubes which must be connected but  can be arranged as you wish. targets in range take 7D10 fire damage (Dex save for half)."
+  },
+  {
+    "name":"Forcecage",
+    "level":7,
+    "school":"Evocation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"100 feet",
+    "components":"V,S,M,1500gp",
+    "scales":false,
+    "description":"Create a magical, spellproof prison to trap a number of creatures."
+  },
+  {
+    "name":"Mirage Arcane",
+    "level":7,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Area of Effect",
+    "casting_time":"10 minutes",
+    "concentration":false,
+    "ritual":false,
+    "duration":"10 days",
+    "range":"sight",
+    "components":"V,S",
+    "scales":false,
+    "description":"Alter a terrain's look, smell and feel to resembele other terrain. E.g. change grassland to a swamp."
+  },
+  {
+    "name":"Mordenkainen's Magnificent Mansion",
+    "level":7,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 day",
+    "range":"300 feet",
+    "components":"V,S,M,5gp",
+    "scales":false,
+    "description":"Create a mansion with rooms, food and servants to serve 100 people. "
+  },
+  {
+    "name":"Mordenkainen's Sword",
+    "level":7,
+    "school":"Evocation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S,M,250gp",
+    "scales":false,
+    "description":"Create a sword-shaped plane of force you control which deals 3D10 force damage"
+  },
+  {
+    "name":"Plane Shift",
+    "level":7,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Travel",
+    "target":"Touch",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S,M,250gp",
+    "scales":false,
+    "description":"Teleport yourself and up to 8 willing creatures to a different plane or banish a creature there."
+  },
+  {
+    "name":"Prismatic Spray",
+    "level":7,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Deal 10D6 damage of various types (Dex save for half), restrain or blind all targets in a 60ft cone. "
+  },
+  {
+    "name":"Project Image",
+    "level":7,
+    "school":"Illusion",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 day",
+    "range":"500 miles",
+    "components":"V,S,M,5gp",
+    "scales":false,
+    "description":"Project an image of yourself. Be able to see and hear through the image. "
+  },
+  {
+    "name":"Regenerate",
+    "level":7,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"Touch",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Heal for 4D8 + 15 HP and regenerate lost limbs etc."
+  },
+  {
+    "name":"Resurrection",
+    "level":7,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"1 dead creature",
+    "casting_time":"1 hour",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S,M,1000gp",
+    "scales":false,
+    "description":"Resurrect a dead creature. See PHB for details."
+  },
+  {
+    "name":"Reverse Gravity",
+    "level":7,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"100 foot",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Reverse the effects of gravity in a 50ft radius 100ft high cylinder."
+  },
+  {
+    "name":"Sequester",
+    "level":7,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 creature or object",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"permanent",
+    "range":"Touch",
+    "components":"V,S,M,5000gp",
+    "scales":false,
+    "description":"Hide the target (even against Divination). The target returns when a specific condition has been met."
+  },
+  {
+    "name":"Simulacrum",
+    "level":7,
+    "school":"Illusion",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Summon",
+    "target":"1 humanoid or beast",
+    "casting_time":"12 hours",
+    "concentration":false,
+    "ritual":false,
+    "duration":"permanent",
+    "range":"Touch",
+    "components":"V,S,M,1500gp",
+    "scales":false,
+    "description":"Create a crude duplicate of a person or beast. The duplicate follows your commands but does not learn or regain spell slots"
+  },
+  {
+    "name":"Symbol",
+    "level":7,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"1 object",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":false,
+    "duration":"permanent",
+    "range":"Touch",
+    "components":"V,S,M,1000gp",
+    "scales":false,
+    "description":"Inscribe a glyph to activate on a specified trigger. The glyph can produce different effects or cause damage."
+  },
+  {
+    "name":"Teleport",
+    "level":7,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Travel",
+    "target":"up to 9 creatures",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"unlimited",
+    "components":"V",
+    "scales":false,
+    "description":"Teleport yourself and up to 8 others, or an object to a place you know, have seen or can describe. "
+  },
+  {
+    "name":"Animal Shapes",
+    "level":8,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Summon",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 day",
+    "range":"30 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Transform any number of willing creatures in range into CR4 beasts. They retain their Wis, Int and Cha."
+  },
+  {
+    "name":"Antimagic Field",
+    "level":8,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Self",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create an anti-magic field around you, in which magic becomes mundane. See PHB for details"
+  },
+  {
+    "name":"Antipathy/Sympathy",
+    "level":8,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"Area of Effect",
+    "casting_time":"1 hour",
+    "concentration":false,
+    "ritual":false,
+    "duration":"10 days",
+    "range":"60 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create a zone which attracts or repels a specific type of creature."
+  },
+  {
+    "name":"Clone",
+    "level":8,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Healing",
+    "target":"In range",
+    "casting_time":"1 hour",
+    "concentration":false,
+    "ritual":false,
+    "duration":"indefinitely",
+    "range":"Touch",
+    "components":"V,S,M,3000gp",
+    "scales":false,
+    "description":"Create a clone of a living creature in an appropriate vessel. After death, the soul can move to the clone. "
+  },
+  {
+    "name":"Control Weather",
+    "level":8,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"10 minutes",
+    "concentration":true,
+    "ritual":false,
+    "duration":"8 hours",
+    "range":"Self (5 mile radius)",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Take control of the weather, changing precipitation, temperature and wind."
+  },
+  {
+    "name":"Demiplane",
+    "level":8,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"60 feet",
+    "components":"S",
+    "scales":false,
+    "description":"Create a door connecting to a demiplane. The demiplane manifests as a 30ft by 30ft room. When the spell ends, creatures inside remain trapped there."
+  },
+  {
+    "name":"Dominate Monster",
+    "level":8,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Charm",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Charm a monster which will obey your commands."
+  },
+  {
+    "name":"Earthquake",
+    "level":8,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Utility",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"500 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Cause an earthquake in a 100ft radius, doing damage to structures and creating dangerous fissures."
+  },
+  {
+    "name":"Feeblemind",
+    "level":8,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"150 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Shatter the mind of the target, dealing 4D6 psychic damage. The target's Int and Cha becomes 1 (Int saving throw)."
+  },
+  {
+    "name":"Glibness",
+    "level":8,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Self",
+    "components":"V",
+    "scales":false,
+    "description":"You can choose to roll a 15 on any Charisma check, and magic used to determine if you tell the truth will show you do so, no matter what you say."
+  },
+  {
+    "name":"Holy Aura",
+    "level":8,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"30 foot",
+    "components":"V,S,M,1000gp",
+    "scales":false,
+    "description":"Create a holy aura around you. Attacks made on creaturesof your choice inside the aura have disadvantage, and roll saves with advantage."
+  },
+  {
+    "name":"Incendiary Cloud",
+    "level":8,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"150 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"A 20ft radius cloud appears, doing 10d8 fire damage (Dex save for half). The area becomes heavily obscured. The cloud moves in a direction you choose."
+  },
+  {
+    "name":"Maze",
+    "level":8,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Banish a creature to a labyrinthine demiplane. It remains there until it can escape (DC20 Int check)"
+  },
+  {
+    "name":"Mind Blank",
+    "level":8,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"1 willing creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 day",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":false,
+    "description":"Make the target immune to charms, psychic damage, divination, mind altering etc."
+  },
+  {
+    "name":"Power Word Stun",
+    "level":8,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Debuff",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V",
+    "scales":false,
+    "description":"Stun a target of 150hp or less. The target can make a Con save at the end of each of its turns to end the stun."
+  },
+  {
+    "name":"Sunburst",
+    "level":8,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"150 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create a flash of sunlight in a 60ft radius. Creatures in range take 12D6 radiant damage and are blinded (Con save for half and no blind)"
+  },
+  {
+    "name":"Telepathy",
+    "level":8,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"1 day",
+    "range":"unlimited",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Create a telepathic link between you and the target, allowing you to share sounds, text, images etc. "
+  },
+  {
+    "name":"Tsunami",
+    "level":8,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 minute",
+    "concentration":true,
+    "ritual":false,
+    "duration":"6 rounds",
+    "range":"sight",
+    "components":"V,S",
+    "scales":false,
+    "description":"Create a wall of water, dealing 6D10 bludgeoning damage (Str save for half). Creatures caught in the tsunami are moved with it and take damage each turn."
+  },
+  {
+    "name":"Astral Projection",
+    "level":9,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"up to 9 creatures",
+    "casting_time":"1 hour",
+    "concentration":false,
+    "ritual":false,
+    "duration":"special",
+    "range":"10 feet",
+    "components":"V,S,M,1100gp",
+    "scales":false,
+    "description":"Create an Astral Projection of your body which is almost identical and shares your statistics. The astral body can travel the astral plane and pass through portals."
+  },
+  {
+    "name":"Foresight",
+    "level":9,
+    "school":"Divination",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"1 willing creature",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":false,
+    "duration":" 8 hours",
+    "range":"Touch",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Allows the target to see into the immediate future. The target can't be surprised and has advantage on attack rolls, checks and saves. Attacks against the target are made with disadvantage."
+  },
+  {
+    "name":"Gate",
+    "level":9,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Travel",
+    "target":"In range",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"60 feet",
+    "components":"V,S,M,5000gp",
+    "scales":false,
+    "description":"Create a portal linking to a precise location on a different plane. The portal allows for one-way travel to the other plane."
+  },
+  {
+    "name":"Imprisonment",
+    "level":9,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"1 creature",
+    "casting_time":"1 minute",
+    "concentration":false,
+    "ritual":false,
+    "duration":"permanent",
+    "range":"30 feet",
+    "components":"V,S,M,500gp/HitDie",
+    "scales":false,
+    "description":"Create a prison, magical chains or demiplane to hold a creature. The prison is protected against teleportation, planar traval and divination."
+  },
+  {
+    "name":"Mass Heal",
+    "level":9,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"any in range",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Heal up to 700hp to creatures in range. They are also cured of all diseases, blindness and deafness."
+  },
+  {
+    "name":"Meteor Swarm",
+    "level":9,
+    "school":"Evocation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"1 mile",
+    "components":"V,S",
+    "scales":false,
+    "description":"Four meteors fall to the ground at different points you choose. Creatures in 40ft of each point take 20D6 Fire and 20D6 bludgeoning damage (Dex save for half)."
+  },
+  {
+    "name":"Power Word Heal",
+    "level":9,
+    "school":"Evocation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S",
+    "scales":false,
+    "description":"Fully heal a creature and remove charmed, frightened, paralyzed and stunned conditions. "
+  },
+  {
+    "name":"Power Word Kill",
+    "level":9,
+    "school":"Enchantment",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"1 creature",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"60 feet",
+    "components":"V",
+    "scales":false,
+    "description":"Instantly kill a creature with less than 100HP."
+  },
+  {
+    "name":"Prismatic Wall",
+    "level":9,
+    "school":"Abjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Guarding",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"10 minutes",
+    "range":"60 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Create a multi-colored, multi-layered wall up to 90ft long. Each layer creates a specific effect. See PHB"
+  },
+  {
+    "name":"Shapechange",
+    "level":9,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"Self",
+    "components":"V,S,M,1500gp",
+    "scales":false,
+    "description":"Change shape to become some creature of CR equal or lower than your level. You keep your Int, Wis, Cha and alignment. "
+  },
+  {
+    "name":"Storm of Vengeance",
+    "level":9,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"sight",
+    "components":"V,S",
+    "scales":false,
+    "description":"Create a 360ft radius thunderstorm over an area. Creatures under the storm take a variety of sorts of damage. See PHB for details."
+  },
+  {
+    "name":"Time Stop",
+    "level":9,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"in",
+    "range":"Self",
+    "components":"V",
+    "scales":false,
+    "description":"Stop time for anyone but you for 1D4 +1 rounds. "
+  },
+  {
+    "name":"True Polymorph",
+    "level":9,
+    "school":"Transmutation",
+    "class_list": {
+        "bard":true,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":true,
+        "wizard":true
+    },
+    "type":"Buff",
+    "target":"1 creature or object",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 hour",
+    "range":"30 feet",
+    "components":"V,S,M",
+    "scales":false,
+    "description":"Transform a creature or object into another shape. If you maintain concentration for 1 hour, the change becomes permanent."
+  },
+  {
+    "name":"True Resurrection",
+    "level":9,
+    "school":"Necromancy",
+    "class_list": {
+        "bard":false,
+        "cleric":true,
+        "druid":true,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":false
+    },
+    "type":"Healing",
+    "target":"1 dead creature",
+    "casting_time":"1 hour",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Touch",
+    "components":"V,S,M,25000gp",
+    "scales":false,
+    "description":"Resurrect a dead creature, replacing lost body parts and curing it of all disease, poison and curses. "
+  },
+  {
+    "name":"Weird",
+    "level":9,
+    "school":"Illusion",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":false,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Damage",
+    "target":"Area of Effect",
+    "casting_time":"1 action",
+    "concentration":true,
+    "ritual":false,
+    "duration":"1 minute",
+    "range":"120 feet",
+    "components":"V,S",
+    "scales":false,
+    "description":"Create images of their deepest fears in the minds of each creature in a 30ft radius. They are frightened and take 4D10 psychic damage each turn (Wis save ends the effect)"
+  },
+  {
+    "name":"Wish",
+    "level":9,
+    "school":"Conjuration",
+    "class_list": {
+        "bard":false,
+        "cleric":false,
+        "druid":false,
+        "paladin":false,
+        "ranger":false,
+        "sorcerer":true,
+        "warlock":false,
+        "wizard":true
+    },
+    "type":"Utility",
+    "target":"Self",
+    "casting_time":"1 action",
+    "concentration":false,
+    "ritual":false,
+    "duration":"instantaneous",
+    "range":"Self",
+    "components":"V",
+    "scales":false,
+    "description":"Duplicate any 8th lvl or lower spell, create objects, heal, resurrect, alter time or do anything you can clearly describe."
+  }
+];
+},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\CharacterStore.js":[function(require,module,exports){
 var Reflux = require('reflux'),
     RouteActions = require('../actions/RouteActions.js'),
     CharacterActions = require('../actions/CharacterActions.js');
@@ -2153,7 +9903,39 @@ var CharacterStore = Reflux.createStore({
 
 
 module.exports = CharacterStore;
-},{"../actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","../actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\RouteStore.js":[function(require,module,exports){
+},{"../actions/CharacterActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\CharacterActions.js","../actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\DialogStore.js":[function(require,module,exports){
+var Reflux = require('reflux'),
+    // sugar = require('sugar'),
+    DialogActions = require('../actions/DialogActions.js');
+
+var _data = null;
+
+var DialogStore = Reflux.createStore({
+  
+  listenables: DialogActions,  //maps actions to handlers bellow
+  
+  onOpen: function(dialog) {
+    this.trigger('open', dialog);
+  },
+  
+  onClose: function() {
+    this.trigger('close');
+  },
+  
+  // onMakeSelection : function(data) {
+  //   _data = data;
+  //   this.trigger('selection', _data);
+  // },
+  
+  // getData: function() {
+  //   return _data;
+  // },
+  
+});
+
+
+module.exports = DialogStore;
+},{"../actions/DialogActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\DialogActions.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\RouteStore.js":[function(require,module,exports){
 var Reflux = require('reflux'),
     // sugar = require('sugar'),
     RouteActions = require('../actions/RouteActions.js');
@@ -2182,7 +9964,7 @@ var RouteStore = Reflux.createStore({
 
 
 module.exports = RouteStore;
-},{"../actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\SoundStore.js":[function(require,module,exports){
+},{"../actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\SoundStore.js":[function(require,module,exports){
 var Reflux = require('reflux'),
     
     Howl = require('howler').Howl;
@@ -2220,7 +10002,7 @@ var SoundStore = Reflux.createStore({
 
 
 module.exports = SoundStore;
-},{"../actions/SoundActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\SoundActions.js","howler":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\howler\\howler.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\UserStore.js":[function(require,module,exports){
+},{"../actions/SoundActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\SoundActions.js","howler":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\howler\\howler.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\stores\\UserStore.js":[function(require,module,exports){
 var Reflux = require('reflux'),
     UserActions = require('../actions/UserActions.js'),
     RouteActions = require('../actions/RouteActions.js'),
@@ -2270,7 +10052,7 @@ var UserStore = Reflux.createStore({
 
 
 module.exports = UserStore;
-},{"../actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","../actions/UserActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\UserActions.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js","store":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\store\\store.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\howler\\howler.js":[function(require,module,exports){
+},{"../actions/RouteActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\RouteActions.js","../actions/UserActions.js":"D:\\Dropbox\\Coding\\www\\heroforge\\js\\app\\actions\\UserActions.js","reflux":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js","store":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\store\\store.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\howler\\howler.js":[function(require,module,exports){
 /*!
  *  howler.js v1.1.25
  *  howlerjs.com
@@ -3625,6 +11407,4904 @@ module.exports = UserStore;
 
 })();
 
+},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\index.js":[function(require,module,exports){
+module.exports = {
+  AppBar: require('./js/app-bar'),
+  AppCanvas: require('./js/app-canvas'),
+  Checkbox: require('./js/checkbox'),
+  DatePicker: require('./js/date-picker/date-picker'),
+  Dialog: require('./js/dialog'),
+  DialogWindow: require('./js/dialog-window'),
+  DropDownIcon: require('./js/drop-down-icon'),
+  DropDownMenu: require('./js/drop-down-menu'),
+  EnhancedButton: require('./js/enhanced-button'),
+  FlatButton: require('./js/flat-button'),
+  FloatingActionButton: require('./js/floating-action-button'),
+  FontIcon: require('./js/font-icon'),
+  IconButton: require('./js/icon-button'),
+  Input: require('./js/input'),
+  LeftNav: require('./js/left-nav'),
+  MenuItem: require('./js/menu-item'),
+  Menu: require('./js/menu'),
+  Mixins: {
+    Classable: require('./js/mixins/classable'),
+    ClickAwayable: require('./js/mixins/click-awayable'),
+    WindowListenable: require('./js/mixins/window-listenable')
+  },
+  Paper: require('./js/paper'),
+  RadioButton: require('./js/radio-button'),
+  RadioButtonGroup: require('./js/radio-button-group'),
+  RaisedButton: require('./js/raised-button'),
+  Slider: require('./js/slider'),
+  SvgIcon: require('./js/svg-icons/svg-icon'),
+  Icons: {
+    NavigationMenu: require('./js/svg-icons/navigation-menu'),
+    NavigationChevronLeft: require('./js/svg-icons/navigation-chevron-left'),
+    NavigationChevronRight: require('./js/svg-icons/navigation-chevron-right')
+  },
+  Tab: require('./js/tabs/tab'),
+  Tabs: require('./js/tabs/tabs'),
+  Toggle: require('./js/toggle'),
+  Snackbar: require('./js/snackbar'),
+  TextField: require('./js/text-field'),
+  Toolbar: require('./js/toolbar'),
+  ToolbarGroup: require('./js/toolbar-group'),
+  Tooltip: require('./js/tooltip'),
+  Utils: {
+    CssEvent: require('./js/utils/css-event'),
+    Dom: require('./js/utils/dom'),
+    Events: require('./js/utils/events'),
+    KeyCode: require('./js/utils/key-code'),
+    KeyLine: require('./js/utils/key-line')
+  }
+};
+
+},{"./js/app-bar":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\app-bar.js","./js/app-canvas":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\app-canvas.js","./js/checkbox":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\checkbox.js","./js/date-picker/date-picker":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\date-picker\\date-picker.js","./js/dialog":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\dialog.js","./js/dialog-window":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\dialog-window.js","./js/drop-down-icon":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\drop-down-icon.js","./js/drop-down-menu":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\drop-down-menu.js","./js/enhanced-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\enhanced-button.js","./js/flat-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\flat-button.js","./js/floating-action-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\floating-action-button.js","./js/font-icon":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\font-icon.js","./js/icon-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\icon-button.js","./js/input":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\input.js","./js/left-nav":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\left-nav.js","./js/menu":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\menu.js","./js/menu-item":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\menu-item.js","./js/mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./js/mixins/click-awayable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\click-awayable.js","./js/mixins/window-listenable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\window-listenable.js","./js/paper":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\paper.js","./js/radio-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\radio-button.js","./js/radio-button-group":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\radio-button-group.js","./js/raised-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\raised-button.js","./js/slider":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\slider.js","./js/snackbar":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\snackbar.js","./js/svg-icons/navigation-chevron-left":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\navigation-chevron-left.js","./js/svg-icons/navigation-chevron-right":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\navigation-chevron-right.js","./js/svg-icons/navigation-menu":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\navigation-menu.js","./js/svg-icons/svg-icon":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\svg-icon.js","./js/tabs/tab":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\tabs\\tab.js","./js/tabs/tabs":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\tabs\\tabs.js","./js/text-field":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\text-field.js","./js/toggle":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\toggle.js","./js/toolbar":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\toolbar.js","./js/toolbar-group":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\toolbar-group.js","./js/tooltip":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\tooltip.js","./js/utils/css-event":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\css-event.js","./js/utils/dom":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\dom.js","./js/utils/events":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\events.js","./js/utils/key-code":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\key-code.js","./js/utils/key-line":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\key-line.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\app-bar.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('./mixins/classable');
+var IconButton = require('./icon-button');
+var NavigationMenu = require('./svg-icons/navigation-menu');
+var Paper = require('./paper');
+
+var AppBar = React.createClass({displayName: "AppBar",
+
+  mixins: [Classable],
+
+  propTypes: {
+    onMenuIconButtonTouchTap: React.PropTypes.func,
+    showMenuIconButton: React.PropTypes.bool,
+    title : React.PropTypes.string,
+    zDepth: React.PropTypes.number
+  },
+
+  getDefaultProps: function() {
+    return {
+      showMenuIconButton: true,
+      title: '',
+      zDepth: 1
+    }
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+      this.props,onTouchTap=$__0.onTouchTap,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{onTouchTap:1});
+
+    var classes = this.getClasses('mui-app-bar'),
+      title, menuIconButton;
+
+    if (this.props.title) {
+      title = React.createElement("h1", {className: "mui-app-bar-title"}, this.props.title);
+    }
+
+
+
+
+    if (this.props.showMenuIconButton) {
+      menuIconButton = (
+        React.createElement(IconButton, {
+          className: "mui-app-bar-navigation-icon-button", 
+          onTouchTap: this._onMenuIconButtonTouchTap}, 
+            React.createElement(NavigationMenu, null)
+        )
+      );
+    }
+
+    return (
+      React.createElement(Paper, {rounded: false, className: classes, zDepth: this.props.zDepth}, 
+        menuIconButton, 
+        title, 
+        this.props.children
+      )
+    );
+  },
+
+  _onMenuIconButtonTouchTap: function(e) {
+    if (this.props.onMenuIconButtonTouchTap) this.props.onMenuIconButtonTouchTap(e);
+  }
+
+});
+
+module.exports = AppBar;
+
+},{"./icon-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\icon-button.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./paper":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\paper.js","./svg-icons/navigation-menu":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\navigation-menu.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\app-canvas.js":[function(require,module,exports){
+var React = require('react'),
+  Classable = require('./mixins/classable');
+
+var AppCanvas = React.createClass({displayName: "AppCanvas",
+
+  mixins: [Classable],
+
+  propTypes: {
+    predefinedLayout: React.PropTypes.number
+  },
+
+  render: function() {
+    var classes = this.getClasses({
+      'mui-app-canvas': true,
+      'mui-predefined-layout-1': this.props.predefinedLayout === 1
+    });
+
+    return (
+      React.createElement("div", {className: classes}, 
+        this.props.children
+      )
+    );
+  }
+
+});
+
+module.exports = AppCanvas;
+
+},{"./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\checkbox.js":[function(require,module,exports){
+var React = require('react');
+var EnhancedSwitch = require('./enhanced-switch');
+var Classable = require('./mixins/classable');
+var CheckboxOutline = require('./svg-icons/toggle-check-box-outline-blank');
+var CheckboxChecked = require('./svg-icons/toggle-check-box-checked');
+
+var Checkbox = React.createClass({displayName: "Checkbox",
+
+  mixins: [Classable],
+
+  propTypes: {
+    onCheck: React.PropTypes.func,
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+      this.props,onCheck=$__0.onCheck,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{onCheck:1});
+
+    var classes = this.getClasses("mui-checkbox");
+
+    var checkboxElement = (
+      React.createElement("div", null, 
+        React.createElement(CheckboxOutline, {className: "mui-checkbox-box"}), 
+        React.createElement(CheckboxChecked, {className: "mui-checkbox-check"})
+      )
+    );
+
+    var enhancedSwitchProps = {
+      ref: "enhancedSwitch",
+      inputType: "checkbox",
+      switchElement: checkboxElement,
+      className: classes,
+      iconClassName: "mui-checkbox-icon",
+      onSwitch: this._handleCheck,
+      labelPosition: (this.props.labelPosition) ? this.props.labelPosition : "right"
+    };
+
+    return (
+      React.createElement(EnhancedSwitch, React.__spread({},  
+        other, 
+        enhancedSwitchProps))
+    );
+  },
+
+  isChecked: function() {
+    return this.refs.enhancedSwitch.isSwitched();
+  },
+
+  setChecked: function(newCheckedValue) {
+    this.refs.enhancedSwitch.setSwitched(newCheckedValue);
+  },
+
+  _handleCheck: function(e, isInputChecked) {
+    if (this.props.onCheck) this.props.onCheck(e, isInputChecked);
+  }
+});
+
+module.exports = Checkbox;
+
+},{"./enhanced-switch":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\enhanced-switch.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./svg-icons/toggle-check-box-checked":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\toggle-check-box-checked.js","./svg-icons/toggle-check-box-outline-blank":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\toggle-check-box-outline-blank.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\date-picker\\calendar-month.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('../mixins/classable');
+var DateTime = require('../utils/date-time');
+var DayButton = require('./day-button');
+
+var CalendarMonth = React.createClass({displayName: "CalendarMonth",
+
+  mixins: [Classable],
+
+  propTypes: {
+    displayDate: React.PropTypes.object.isRequired,
+    onDayTouchTap: React.PropTypes.func,
+    selectedDate: React.PropTypes.object.isRequired
+  },
+
+  render: function() {
+    var classes = this.getClasses('mui-date-picker-calendar-month');
+
+    return (
+      React.createElement("div", {className: classes}, 
+        this._getWeekElements()
+      )
+    );
+  },
+
+  _getWeekElements: function() {
+    var weekArray = DateTime.getWeekArray(this.props.displayDate);
+
+    return weekArray.map(function(week, i) {
+      return (
+        React.createElement("div", {
+          key: i, 
+          className: "mui-date-picker-calendar-month-week"}, 
+          this._getDayElements(week)
+        )
+      );
+    }, this);
+  },
+
+  _getDayElements: function(week) {
+    return week.map(function(day, i) {
+      var selected = DateTime.isEqualDate(this.props.selectedDate, day);
+      return (
+        React.createElement(DayButton, {
+          key: i, 
+          date: day, 
+          onTouchTap: this._handleDayTouchTap, 
+          selected: selected})
+      );
+    }, this);
+  },
+
+  _handleDayTouchTap: function(e, date) {
+    if (this.props.onDayTouchTap) this.props.onDayTouchTap(e, date);
+  }
+
+});
+
+module.exports = CalendarMonth;
+},{"../mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","../utils/date-time":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\date-time.js","./day-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\date-picker\\day-button.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\date-picker\\calendar-toolbar.js":[function(require,module,exports){
+var React = require('react');
+var DateTime = require('../utils/date-time');
+var IconButton = require('../icon-button');
+var NavigationChevronLeft = require('../svg-icons/navigation-chevron-left');
+var NavigationChevronRight = require('../svg-icons/navigation-chevron-right');
+var SlideInTransitionGroup = require('../transition-groups/slide-in');
+
+var CalendarToolbar = React.createClass({displayName: "CalendarToolbar",
+
+  propTypes: {
+    displayDate: React.PropTypes.object.isRequired,
+    onLeftTouchTap: React.PropTypes.func,
+    onRightTouchTap: React.PropTypes.func
+  },
+
+  getInitialState: function() {
+    return {
+      transitionDirection: 'up'
+    };
+  },
+
+  componentWillReceiveProps: function(nextProps) {
+    var direction;
+
+    if (nextProps.displayDate !== this.props.displayDate) {
+      direction = nextProps.displayDate > this.props.displayDate ? 'up' : 'down';
+      this.setState({
+        transitionDirection: direction
+      });
+    }
+  },
+
+  render: function() {
+    var month = DateTime.getFullMonth(this.props.displayDate);
+    var year = this.props.displayDate.getFullYear();
+
+    return (
+      React.createElement("div", {className: "mui-date-picker-calendar-toolbar"}, 
+
+        React.createElement(SlideInTransitionGroup, {
+          className: "mui-date-picker-calendar-toolbar-title", 
+          direction: this.state.transitionDirection}, 
+          React.createElement("div", {key: month + '_' + year}, month, " ", year)
+        ), 
+
+        React.createElement(IconButton, {
+          className: "mui-date-picker-calendar-toolbar-button-left", 
+          onTouchTap: this.props.onLeftTouchTap}, 
+            React.createElement(NavigationChevronLeft, null)
+        ), 
+
+        React.createElement(IconButton, {
+          className: "mui-date-picker-calendar-toolbar-button-right", 
+          iconClassName: "navigation-chevron-right", 
+          onTouchTap: this.props.onRightTouchTap}, 
+            React.createElement(NavigationChevronRight, null)
+        )
+
+      )
+    );
+  }
+
+});
+
+module.exports = CalendarToolbar;
+},{"../icon-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\icon-button.js","../svg-icons/navigation-chevron-left":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\navigation-chevron-left.js","../svg-icons/navigation-chevron-right":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\navigation-chevron-right.js","../transition-groups/slide-in":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\transition-groups\\slide-in.js","../utils/date-time":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\date-time.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\date-picker\\calendar.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('../mixins/classable');
+var WindowListenable = require('../mixins/window-listenable');
+var DateTime = require('../utils/date-time');
+var KeyCode = require('../utils/key-code');
+var CalendarMonth = require('./calendar-month');
+var CalendarToolbar = require('./calendar-toolbar');
+var DateDisplay = require('./date-display');
+var SlideInTransitionGroup = require('../transition-groups/slide-in');
+
+var Calendar = React.createClass({displayName: "Calendar",
+
+  mixins: [Classable, WindowListenable],
+
+  propTypes: {
+    initialDate: React.PropTypes.object,
+    isActive: React.PropTypes.bool
+  },
+
+  windowListeners: {
+    'keydown': '_handleWindowKeyDown'
+  },
+
+  getDefaultProps: function() {
+    return {
+      initialDate: new Date()
+    };
+  },
+
+  getInitialState: function() {
+    return {
+      displayDate: DateTime.getFirstDayOfMonth(this.props.initialDate),
+      selectedDate: this.props.initialDate,
+      transitionDirection: 'left'
+    };
+  },
+
+  componentWillReceiveProps: function(nextProps) {
+    if (nextProps.initialDate !== this.props.initialDate) {
+      var d = nextProps.initialDate || new Date();
+      this.setState({
+        displayDate: DateTime.getFirstDayOfMonth(d),
+        selectedDate: d
+      });
+    }
+  },
+
+  render: function() {
+    var weekCount = DateTime.getWeekArray(this.state.displayDate).length;
+    var classes = this.getClasses('mui-date-picker-calendar', {
+      'mui-is-4week': weekCount === 4,
+      'mui-is-5week': weekCount === 5,
+      'mui-is-6week': weekCount === 6
+    });
+
+    return (
+      React.createElement("div", {className: classes}, 
+
+        React.createElement(DateDisplay, {
+          className: "mui-date-picker-calendar-date-display", 
+          selectedDate: this.state.selectedDate}), 
+
+        React.createElement("div", {
+          className: "mui-date-picker-calendar-container"}, 
+          React.createElement(CalendarToolbar, {
+            displayDate: this.state.displayDate, 
+            onLeftTouchTap: this._handleLeftTouchTap, 
+            onRightTouchTap: this._handleRightTouchTap}), 
+
+          React.createElement("ul", {className: "mui-date-picker-calendar-week-title"}, 
+            React.createElement("li", {className: "mui-date-picker-calendar-week-title-day"}, "S"), 
+            React.createElement("li", {className: "mui-date-picker-calendar-week-title-day"}, "M"), 
+            React.createElement("li", {className: "mui-date-picker-calendar-week-title-day"}, "T"), 
+            React.createElement("li", {className: "mui-date-picker-calendar-week-title-day"}, "W"), 
+            React.createElement("li", {className: "mui-date-picker-calendar-week-title-day"}, "T"), 
+            React.createElement("li", {className: "mui-date-picker-calendar-week-title-day"}, "F"), 
+            React.createElement("li", {className: "mui-date-picker-calendar-week-title-day"}, "S")
+          ), 
+
+          React.createElement(SlideInTransitionGroup, {
+            direction: this.state.transitionDirection}, 
+            React.createElement(CalendarMonth, {
+              key: this.state.displayDate.toDateString(), 
+              displayDate: this.state.displayDate, 
+              onDayTouchTap: this._handleDayTouchTap, 
+              selectedDate: this.state.selectedDate})
+          )
+        )
+      )
+    );
+  },
+
+  getSelectedDate: function() {
+    return this.state.selectedDate;
+  },
+
+  _addDisplayDate: function(m) {
+    var newDisplayDate = DateTime.clone(this.state.displayDate);
+    newDisplayDate.setMonth(newDisplayDate.getMonth() + m);
+    this._setDisplayDate(newDisplayDate);
+  },
+
+  _addSelectedDays: function(days) {
+    this._setSelectedDate(DateTime.addDays(this.state.selectedDate, days));
+  },
+
+  _addSelectedMonths: function(months) {
+    this._setSelectedDate(DateTime.addMonths(this.state.selectedDate, months));
+  },
+
+  _setDisplayDate: function(d, newSelectedDate) {
+    var newDisplayDate = DateTime.getFirstDayOfMonth(d);
+    var direction = newDisplayDate > this.state.displayDate ? 'left' : 'right';
+
+    if (newDisplayDate !== this.state.displayDate) {
+      this.setState({
+        displayDate: newDisplayDate,
+        transitionDirection: direction,
+        selectedDate: newSelectedDate || this.state.selectedDate
+      });
+    }
+  },
+
+  _setSelectedDate: function(d) {
+    var newDisplayDate = DateTime.getFirstDayOfMonth(d);
+
+    if (newDisplayDate !== this.state.displayDate) {
+      this._setDisplayDate(newDisplayDate, d);
+    } else {
+      this.setState({
+        selectedDate: d
+      });
+    }
+  },
+
+  _handleDayTouchTap: function(e, date) {
+    this._setSelectedDate(date);
+  },
+
+  _handleLeftTouchTap: function() {
+    this._addDisplayDate(-1);
+  },
+
+  _handleRightTouchTap: function() {
+    this._addDisplayDate(1);
+  },
+
+  _handleWindowKeyDown: function(e) {
+    var newSelectedDate;
+
+    if (this.props.isActive) {
+
+      switch (e.keyCode) {
+
+        case KeyCode.UP:
+          if (e.shiftKey) {
+            this._addSelectedMonths(-1);
+          } else {
+            this._addSelectedDays(-7);
+          }
+          break;
+
+        case KeyCode.DOWN:
+          if (e.shiftKey) {
+            this._addSelectedMonths(1);
+          } else {
+            this._addSelectedDays(7);
+          }
+          break;
+
+        case KeyCode.RIGHT:
+          if (e.shiftKey) {
+            this._addSelectedMonths(1);
+          } else {
+            this._addSelectedDays(1);
+          }
+          break;
+
+        case KeyCode.LEFT:
+          if (e.shiftKey) {
+            this._addSelectedMonths(-1);
+          } else {
+            this._addSelectedDays(-1);
+          }
+          break;
+
+      }
+
+    } 
+  }
+
+});
+
+module.exports = Calendar;
+},{"../mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","../mixins/window-listenable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\window-listenable.js","../transition-groups/slide-in":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\transition-groups\\slide-in.js","../utils/date-time":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\date-time.js","../utils/key-code":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\key-code.js","./calendar-month":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\date-picker\\calendar-month.js","./calendar-toolbar":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\date-picker\\calendar-toolbar.js","./date-display":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\date-picker\\date-display.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\date-picker\\date-display.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('../mixins/classable');
+var DateTime = require('../utils/date-time');
+var SlideInTransitionGroup = require('../transition-groups/slide-in');
+
+var DateDisplay = React.createClass({displayName: "DateDisplay",
+
+  mixins: [Classable],
+
+  propTypes: {
+    selectedDate: React.PropTypes.object.isRequired
+  },
+
+  getInitialState: function() {
+    return {
+      transitionDirection: 'up'
+    };
+  },
+
+  componentWillReceiveProps: function(nextProps) {
+    var direction;
+
+    if (nextProps.selectedDate !== this.props.selectedDate) {
+      direction = nextProps.selectedDate > this.props.selectedDate ? 'up' : 'down';
+      this.setState({
+        transitionDirection: direction
+      });
+    }
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+      this.props,selectedDate=$__0.selectedDate,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{selectedDate:1});
+    var classes = this.getClasses('mui-date-picker-date-display');
+    var dayOfWeek = DateTime.getDayOfWeek(this.props.selectedDate);
+    var month = DateTime.getShortMonth(this.props.selectedDate);
+    var day = this.props.selectedDate.getDate();
+    var year = this.props.selectedDate.getFullYear();
+
+    return (
+      React.createElement("div", React.__spread({},  other, {className: classes}), 
+
+        React.createElement(SlideInTransitionGroup, {
+          className: "mui-date-picker-date-display-dow", 
+          direction: this.state.transitionDirection}, 
+          React.createElement("div", {key: dayOfWeek}, dayOfWeek)
+        ), 
+
+        React.createElement("div", {className: "mui-date-picker-date-display-date"}, 
+
+          React.createElement(SlideInTransitionGroup, {
+            className: "mui-date-picker-date-display-month", 
+            direction: this.state.transitionDirection}, 
+            React.createElement("div", {key: month}, month)
+          ), 
+
+          React.createElement(SlideInTransitionGroup, {
+            className: "mui-date-picker-date-display-day", 
+            direction: this.state.transitionDirection}, 
+            React.createElement("div", {key: day}, day)
+          ), 
+
+          React.createElement(SlideInTransitionGroup, {
+            className: "mui-date-picker-date-display-year", 
+            direction: this.state.transitionDirection}, 
+            React.createElement("div", {key: year}, year)
+          )
+
+        )
+
+      )
+    );
+  }
+
+});
+
+module.exports = DateDisplay;
+},{"../mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","../transition-groups/slide-in":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\transition-groups\\slide-in.js","../utils/date-time":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\date-time.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\date-picker\\date-picker-dialog.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('../mixins/classable');
+var WindowListenable = require('../mixins/window-listenable');
+var KeyCode = require('../utils/key-code');
+var Calendar = require('./calendar');
+var DialogWindow = require('../dialog-window');
+var FlatButton = require('../flat-button');
+
+var DatePickerDialog = React.createClass({displayName: "DatePickerDialog",
+
+  mixins: [Classable, WindowListenable],
+
+  propTypes: {
+    initialDate: React.PropTypes.object,
+    onAccept: React.PropTypes.func
+  },
+
+  windowListeners: {
+    'keyup': '_handleWindowKeyUp'
+  },
+
+  getInitialState: function() {
+    return {
+      isCalendarActive: false
+    };
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+      
+      this.props,initialDate=$__0.initialDate,onAccept=$__0.onAccept,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{initialDate:1,onAccept:1});
+    var classes = this.getClasses('mui-date-picker-dialog');
+    var actions = [
+      React.createElement(FlatButton, {
+        key: 0, 
+        label: "Cancel", 
+        secondary: true, 
+        onTouchTap: this._handleCancelTouchTap}),
+      React.createElement(FlatButton, {
+        key: 1, 
+        label: "OK", 
+        secondary: true, 
+        onTouchTap: this._handleOKTouchTap})
+    ];
+
+    return (
+      React.createElement(DialogWindow, React.__spread({},  other, 
+        {ref: "dialogWindow", 
+        className: classes, 
+        actions: actions, 
+        contentClassName: "mui-date-picker-dialog-window", 
+        onDismiss: this._handleDialogDismiss, 
+        onShow: this._handleDialogShow, 
+        repositionOnUpdate: false}), 
+        React.createElement(Calendar, {
+          ref: "calendar", 
+          initialDate: this.props.initialDate, 
+          isActive: this.state.isCalendarActive})
+      )
+    );
+  },
+
+  show: function() {
+    this.refs.dialogWindow.show();
+  },
+
+  dismiss: function() {
+    this.refs.dialogWindow.dismiss();
+  },
+
+  _handleCancelTouchTap: function() {
+    this.dismiss();
+  },
+
+  _handleOKTouchTap: function() {
+    this.dismiss();
+    if (this.props.onAccept) {
+      this.props.onAccept(this.refs.calendar.getSelectedDate());
+    }
+  },
+
+  _handleDialogShow: function() {
+    this.setState({
+      isCalendarActive: true
+    });
+  },
+
+  _handleDialogDismiss: function() {
+    this.setState({
+      isCalendarActive: false
+    });
+  },
+
+  _handleWindowKeyUp: function(e) {
+    if (this.refs.dialogWindow.isOpen()) {
+      switch (e.keyCode) {
+        case KeyCode.ENTER:
+          this._handleOKTouchTap();
+          break;
+      }
+    } 
+  }
+
+});
+
+module.exports = DatePickerDialog;
+},{"../dialog-window":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\dialog-window.js","../flat-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\flat-button.js","../mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","../mixins/window-listenable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\window-listenable.js","../utils/key-code":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\key-code.js","./calendar":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\date-picker\\calendar.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\date-picker\\date-picker.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('../mixins/classable');
+var WindowListenable = require('../mixins/window-listenable');
+var DateTime = require('../utils/date-time');
+var KeyCode = require('../utils/key-code');
+var DatePickerDialog = require('./date-picker-dialog');
+var TextField = require('../text-field');
+
+var DatePicker = React.createClass({displayName: "DatePicker",
+
+  mixins: [Classable, WindowListenable],
+
+  propTypes: {
+    defaultDate: React.PropTypes.object,
+    formatDate: React.PropTypes.func,
+    mode: React.PropTypes.oneOf(['portrait', 'landscape', 'inline']),
+    onFocus: React.PropTypes.func,
+    onTouchTap: React.PropTypes.func,
+    onChange: React.PropTypes.func
+  },
+
+  windowListeners: {
+    'keyup': '_handleWindowKeyUp'
+  },
+
+  getDefaultProps: function() {
+    return {
+      formatDate: DateTime.format
+    };
+  },
+
+  getInitialState: function() {
+    return {
+      date: this.props.defaultDate,
+      dialogDate: new Date()
+    };
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+      
+      
+      
+      this.props,formatDate=$__0.formatDate,mode=$__0.mode,onFocus=$__0.onFocus,onTouchTap=$__0.onTouchTap,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{formatDate:1,mode:1,onFocus:1,onTouchTap:1});
+    var classes = this.getClasses('mui-date-picker', {
+      'mui-is-landscape': this.props.mode === 'landscape',
+      'mui-is-inline': this.props.mode === 'inline'
+    });
+    var defaultInputValue;
+
+    if (this.props.defaultDate) {
+      defaultInputValue = this.props.formatDate(this.props.defaultDate);
+    }
+
+    return (
+      React.createElement("div", {className: classes}, 
+        React.createElement(TextField, React.__spread({}, 
+          other, 
+          {ref: "input", 
+          defaultValue: defaultInputValue, 
+          onFocus: this._handleInputFocus, 
+          onTouchTap: this._handleInputTouchTap})), 
+        React.createElement(DatePickerDialog, {
+          ref: "dialogWindow", 
+          initialDate: this.state.dialogDate, 
+          onAccept: this._handleDialogAccept})
+      )
+
+    );
+  },
+
+  getDate: function() {
+    return this.state.date;
+  },
+
+  setDate: function(d) {
+    this.setState({
+      date: d
+    });
+    this.refs.input.setValue(this.props.formatDate(d));
+  },
+
+  _handleDialogAccept: function(d) {
+    this.setDate(d);
+    if (this.props.onChange) this.props.onChange(null, d);
+  },
+
+  _handleInputFocus: function(e) {
+    e.target.blur();
+    if (this.props.onFocus) this.props.onFocus(e);
+  },
+
+  _handleInputTouchTap: function(e) {
+    this.setState({
+      dialogDate: this.getDate()
+    });
+
+    this.refs.dialogWindow.show();
+    if (this.props.onTouchTap) this.props.onTouchTap(e);
+  },
+
+  _handleWindowKeyUp: function(e) {
+    //TO DO: open the dialog if input has focus
+  }
+
+});
+
+module.exports = DatePicker;
+
+},{"../mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","../mixins/window-listenable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\window-listenable.js","../text-field":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\text-field.js","../utils/date-time":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\date-time.js","../utils/key-code":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\key-code.js","./date-picker-dialog":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\date-picker\\date-picker-dialog.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\date-picker\\day-button.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('../mixins/classable');
+var DateTime = require('../utils/date-time');
+var EnhancedButton = require('../enhanced-button');
+
+var DayButton = React.createClass({displayName: "DayButton",
+
+  mixins: [Classable],
+
+  propTypes: {
+    date: React.PropTypes.object,
+    onTouchTap: React.PropTypes.func,
+    selected: React.PropTypes.bool
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+      
+      
+      
+      this.props,className=$__0.className,date=$__0.date,onTouchTap=$__0.onTouchTap,selected=$__0.selected,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,date:1,onTouchTap:1,selected:1});
+    var classes = this.getClasses('mui-date-picker-day-button', { 
+      'mui-is-current-date': DateTime.isEqualDate(this.props.date, new Date()),
+      'mui-is-selected': this.props.selected
+    });
+
+    return this.props.date ? (
+      React.createElement(EnhancedButton, React.__spread({},  other, 
+        {className: classes, 
+        disableFocusRipple: true, 
+        disableTouchRipple: true, 
+        onTouchTap: this._handleTouchTap}), 
+        React.createElement("div", {className: "mui-date-picker-day-button-select"}), 
+        React.createElement("span", {className: "mui-date-picker-day-button-label"}, this.props.date.getDate())
+      )
+    ) : (
+      React.createElement("span", {className: classes})
+    );
+  },
+
+  _handleTouchTap: function(e) {
+    if (this.props.onTouchTap) this.props.onTouchTap(e, this.props.date);
+  }
+
+});
+
+module.exports = DayButton;
+},{"../enhanced-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\enhanced-button.js","../mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","../utils/date-time":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\date-time.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\dialog-window.js":[function(require,module,exports){
+var React = require('react');
+var WindowListenable = require('./mixins/window-listenable');
+var CssEvent = require('./utils/css-event');
+var KeyCode = require('./utils/key-code');
+var Classable = require('./mixins/classable');
+var FlatButton = require('./flat-button');
+var Overlay = require('./overlay');
+var Paper = require('./paper');
+
+var DialogWindow = React.createClass({displayName: "DialogWindow",
+
+  mixins: [Classable, WindowListenable],
+
+  propTypes: {
+    actions: React.PropTypes.array,
+    contentClassName: React.PropTypes.string,
+    openImmediately: React.PropTypes.bool,
+    onClickAway: React.PropTypes.func,
+    onDismiss: React.PropTypes.func,
+    onShow: React.PropTypes.func,
+    repositionOnUpdate: React.PropTypes.bool
+  },
+
+  windowListeners: {
+    'keyup': '_handleWindowKeyUp'
+  },
+
+  getDefaultProps: function() {
+    return {
+      actions: [],
+      repositionOnUpdate: true
+    };
+  },
+
+  getInitialState: function() {
+    return {
+      open: this.props.openImmediately || false
+    };
+  },
+
+  componentDidMount: function() {
+    this._positionDialog();
+  },
+
+  componentDidUpdate: function (prevProps, prevState) {
+    this._positionDialog();
+  },
+
+  render: function() {
+    var classes = this.getClasses('mui-dialog-window', { 
+      'mui-is-shown': this.state.open
+    });
+    var contentClasses = 'mui-dialog-window-contents';
+    var actions = this._getActionsContainer(this.props.actions);
+
+    if (this.props.contentClassName) {
+      contentClasses += ' ' + this.props.contentClassName;
+    }
+
+    return (
+      React.createElement("div", {className: classes}, 
+        React.createElement(Paper, {ref: "dialogWindow", className: contentClasses, zDepth: 4}, 
+          this.props.children, 
+          actions
+        ), 
+        React.createElement(Overlay, {show: this.state.open, onTouchTap: this._handleOverlayTouchTap})
+      )
+    );
+  },
+
+  isOpen: function() {
+    return this.state.open;
+  },
+
+  dismiss: function() {
+
+    CssEvent.onTransitionEnd(this.getDOMNode(), function() {
+      //allow scrolling
+      var body = document.getElementsByTagName('body')[0];
+      body.style.overflow = '';
+      body.style.position = '';
+    });
+
+    this.setState({ open: false });
+    if (this.props.onDismiss) this.props.onDismiss();
+  },
+
+  show: function() {
+    //prevent scrolling
+    var body = document.getElementsByTagName('body')[0];
+    body.style.overflow = 'hidden';
+    body.style.position = 'fixed';
+
+    this.setState({ open: true });
+    if (this.props.onShow) this.props.onShow();
+  },
+
+  _addClassName: function(reactObject, className) {
+    var originalClassName = reactObject.props.className;
+
+    reactObject.props.className = originalClassName ?
+      originalClassName + ' ' + className : className;
+  },
+
+  _getAction: function(actionJSON, key) {
+    var onClickHandler = actionJSON.onClick ? actionJSON.onClick : this.dismiss;
+    return (
+      React.createElement(FlatButton, {
+        key: key, 
+        secondary: true, 
+        onClick: onClickHandler, 
+        label: actionJSON.text})
+    );
+  },
+
+  _getActionsContainer: function(actions) {
+    var actionContainer;
+    var actionObjects = [];
+
+    if (actions.length) {
+      for (var i = 0; i < actions.length; i++) {
+        currentAction = actions[i];
+
+        //if the current action isn't a react object, create one
+        if (!React.isValidElement(currentAction)) {
+          currentAction = this._getAction(currentAction, i);
+        }
+
+        this._addClassName(currentAction, 'mui-dialog-window-action');
+        actionObjects.push(currentAction);
+      };
+
+      actionContainer = (
+        React.createElement("div", {className: "mui-dialog-window-actions"}, 
+          actionObjects
+        )
+      );
+    }
+
+    return actionContainer;
+  },
+
+  _positionDialog: function() {
+    var container, dialogWindow, containerHeight, dialogWindowHeight;
+
+    if (this.state.open) {
+
+      container = this.getDOMNode(),
+      dialogWindow = this.refs.dialogWindow.getDOMNode(),
+      containerHeight = container.offsetHeight,
+
+      //Reset the height in case the window was resized.
+      dialogWindow.style.height = '';
+      dialogWindowHeight = dialogWindow.offsetHeight;
+
+      //Vertically center the dialog window, but make sure it doesn't
+      //transition to that position.
+      if (this.props.repositionOnUpdate || !container.style.paddingTop) {
+        container.style.paddingTop = 
+          ((containerHeight - dialogWindowHeight) / 2) - 64 + 'px';
+      }
+      
+
+    }
+  },
+
+  _handleOverlayTouchTap: function() {
+    this.dismiss();
+    if (this.props.onClickAway) this.props.onClickAway();
+  },
+
+  _handleWindowKeyUp: function(e) {
+    if (e.keyCode == KeyCode.ESC) {
+      this.dismiss();
+    }
+  }
+
+});
+
+module.exports = DialogWindow;
+},{"./flat-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\flat-button.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./mixins/window-listenable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\window-listenable.js","./overlay":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\overlay.js","./paper":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\paper.js","./utils/css-event":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\css-event.js","./utils/key-code":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\key-code.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\dialog.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('./mixins/classable');
+var DialogWindow = require('./dialog-window');
+
+var Dialog = React.createClass({displayName: "Dialog",
+
+  mixins: [Classable],
+
+  propTypes: {
+    title: React.PropTypes.string
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+      
+      this.props,className=$__0.className,title=$__0.title,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,title:1});
+    var classes = this.getClasses('mui-dialog');
+
+    return (
+      React.createElement(DialogWindow, React.__spread({}, 
+        other, 
+        {ref: "dialogWindow", 
+        className: classes}), 
+
+        React.createElement("h3", {className: "mui-dialog-title"}, this.props.title), 
+        React.createElement("div", {ref: "dialogContent", className: "mui-dialog-content"}, 
+          this.props.children
+        )
+        
+      )
+    );
+  },
+
+  dismiss: function() {
+    this.refs.dialogWindow.dismiss();
+  },
+
+  show: function() {
+    this.refs.dialogWindow.show();
+  }
+
+});
+
+module.exports = Dialog;
+},{"./dialog-window":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\dialog-window.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\drop-down-icon.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('./mixins/classable');
+var ClickAwayable = require('./mixins/click-awayable');
+var KeyLine = require('./utils/key-line');
+var Paper = require('./paper');
+var FontIcon = require('./font-icon');
+var Menu = require('./menu');
+var MenuItem = require('./menu-item');
+
+var DropDownIcon = React.createClass({displayName: "DropDownIcon",
+
+  mixins: [Classable, ClickAwayable],
+
+  propTypes: {
+    onChange: React.PropTypes.func,
+    menuItems: React.PropTypes.array.isRequired
+  },
+
+  getInitialState: function() {
+    return {
+      open: false
+    }
+  },
+
+  componentClickAway: function() {
+    this.setState({ open: false });
+  },
+
+  render: function() {
+    var classes = this.getClasses('mui-drop-down-icon', {
+      'mui-open': this.state.open
+    });
+
+    var icon;
+    if (this.props.iconClassName) icon = React.createElement(FontIcon, {className: this.props.iconClassName});
+   
+    return (
+      React.createElement("div", {className: classes}, 
+          React.createElement("div", {className: "mui-menu-control", onClick: this._onControlClick}, 
+              icon, 
+              this.props.children
+          ), 
+          React.createElement(Menu, {ref: "menuItems", menuItems: this.props.menuItems, hideable: true, visible: this.state.open, onItemClick: this._onMenuItemClick})
+        )
+    );
+  },
+
+  _onControlClick: function(e) {
+    this.setState({ open: !this.state.open });
+  },
+
+  _onMenuItemClick: function(e, key, payload) {
+    if (this.props.onChange) this.props.onChange(e, key, payload);
+    this.setState({ open: false });
+  }
+
+});
+
+module.exports = DropDownIcon;
+
+},{"./font-icon":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\font-icon.js","./menu":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\menu.js","./menu-item":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\menu-item.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./mixins/click-awayable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\click-awayable.js","./paper":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\paper.js","./utils/key-line":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\key-line.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\drop-down-menu.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('./mixins/classable');
+var ClickAwayable = require('./mixins/click-awayable');
+var DropDownArrow = require('./svg-icons/drop-down-arrow');
+var KeyLine = require('./utils/key-line');
+var Paper = require('./paper');
+var Menu = require('./menu');
+
+var DropDownMenu = React.createClass({displayName: "DropDownMenu",
+
+  mixins: [Classable, ClickAwayable],
+
+  propTypes: {
+    autoWidth: React.PropTypes.bool,
+    onChange: React.PropTypes.func,
+    menuItems: React.PropTypes.array.isRequired
+  },
+
+  getDefaultProps: function() {
+    return {
+      autoWidth: true
+    };
+  },
+
+  getInitialState: function() {
+    return {
+      open: false,
+      selectedIndex: this.props.selectedIndex || 0
+    }
+  },
+
+  componentClickAway: function() {
+    this.setState({ open: false });
+  },
+
+  componentDidMount: function() {
+    if (this.props.autoWidth) this._setWidth();
+  },
+
+  componentWillReceiveProps: function(nextProps) {
+    if (nextProps.hasOwnProperty('selectedIndex')) {
+      this.setState({selectedIndex: nextProps.selectedIndex});
+    }
+  },
+
+  render: function() {
+    var classes = this.getClasses('mui-drop-down-menu', {
+      'mui-open': this.state.open
+    });
+
+    return (
+      React.createElement("div", {className: classes}, 
+        React.createElement("div", {className: "mui-menu-control", onClick: this._onControlClick}, 
+          React.createElement(Paper, {className: "mui-menu-control-bg", zDepth: 0}), 
+          React.createElement("div", {className: "mui-menu-label"}, 
+            this.props.menuItems[this.state.selectedIndex].text
+          ), 
+          React.createElement(DropDownArrow, {className: "mui-menu-drop-down-icon"}), 
+          React.createElement("div", {className: "mui-menu-control-underline"})
+        ), 
+        React.createElement(Menu, {
+          ref: "menuItems", 
+          autoWidth: this.props.autoWidth, 
+          selectedIndex: this.state.selectedIndex, 
+          menuItems: this.props.menuItems, 
+          hideable: true, 
+          visible: this.state.open, 
+          onItemClick: this._onMenuItemClick})
+      )
+    );
+  },
+
+  _setWidth: function() {
+    var el = this.getDOMNode(),
+      menuItemsDom = this.refs.menuItems.getDOMNode();
+
+    el.style.width = menuItemsDom.offsetWidth + 'px';
+  },
+
+  _onControlClick: function(e) {
+    this.setState({ open: !this.state.open });
+  },
+
+  _onMenuItemClick: function(e, key, payload) {
+    if (this.props.onChange && this.state.selectedIndex !== key) this.props.onChange(e, key, payload);
+    this.setState({
+      selectedIndex: key,
+      open: false
+    });
+  }
+
+});
+
+module.exports = DropDownMenu;
+},{"./menu":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\menu.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./mixins/click-awayable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\click-awayable.js","./paper":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\paper.js","./svg-icons/drop-down-arrow":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\drop-down-arrow.js","./utils/key-line":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\key-line.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\enhanced-button.js":[function(require,module,exports){
+var React = require('react');
+var KeyCode = require('./utils/key-code');
+var Classable = require('./mixins/classable');
+var WindowListenable = require('./mixins/window-listenable');
+var FocusRipple = require('./ripples/focus-ripple');
+var TouchRipple = require('./ripples/touch-ripple');
+
+var EnhancedButton = React.createClass({displayName: "EnhancedButton",
+
+  mixins: [Classable, WindowListenable],
+
+  propTypes: {
+    centerRipple: React.PropTypes.bool,
+    className: React.PropTypes.string,
+    disabled: React.PropTypes.bool,
+    disableFocusRipple: React.PropTypes.bool,
+    disableTouchRipple: React.PropTypes.bool,
+    linkButton: React.PropTypes.bool,
+    onBlur: React.PropTypes.func,
+    onFocus: React.PropTypes.func,
+    onTouchTap: React.PropTypes.func
+  },
+
+  windowListeners: {
+    'keydown': '_handleWindowKeydown',
+    'keyup': '_handleWindowKeyup'
+  },
+
+  getInitialState: function() {
+    return {
+      isKeyboardFocused: false 
+    };
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+      
+      
+      
+      
+      
+      
+         this.props,centerRipple=$__0.centerRipple,disabled=$__0.disabled,disableFocusRipple=$__0.disableFocusRipple,disableTouchRipple=$__0.disableTouchRipple,linkButton=$__0.linkButton,onBlur=$__0.onBlur,onFocus=$__0.onFocus,onTouchTap=$__0.onTouchTap,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{centerRipple:1,disabled:1,disableFocusRipple:1,disableTouchRipple:1,linkButton:1,onBlur:1,onFocus:1,onTouchTap:1});
+    var classes = this.getClasses('mui-enhanced-button', {
+      'mui-is-disabled': disabled,
+      'mui-is-keyboard-focused': this.state.isKeyboardFocused,
+      'mui-is-link-button': linkButton
+    });
+    var touchRipple = (
+      React.createElement(TouchRipple, {
+        ref: "touchRipple", 
+        key: "touchRipple", 
+        centerRipple: centerRipple}, 
+        this.props.children
+        )
+    );
+    var focusRipple = (
+      React.createElement(FocusRipple, {
+        key: "focusRipple", 
+        show: this.state.isKeyboardFocused})
+    );
+    var buttonProps = {
+      className: classes,
+      disabled: disabled,
+      onBlur: this._handleBlur,
+      onFocus: this._handleFocus,
+      onTouchTap: this._handleTouchTap
+    };
+    var buttonChildren = [
+      disabled || disableTouchRipple ? this.props.children : touchRipple,
+      disabled || disableFocusRipple ? null : focusRipple
+    ];
+
+    if (disabled && linkButton) {
+      return (
+        React.createElement("span", React.__spread({},  other, 
+          {className: classes, 
+          disabled: disabled}), 
+          this.props.children
+        )
+      );
+    }
+
+    return linkButton ? (
+      React.createElement("a", React.__spread({},  other,  buttonProps), 
+        buttonChildren
+      )
+    ) : (
+      React.createElement("button", React.__spread({},  other,  buttonProps), 
+        buttonChildren
+      )
+    );
+  },
+
+  isKeyboardFocused: function() {
+    return this.state.isKeyboardFocused;
+  },
+
+  _handleWindowKeydown: function(e) {
+    if (e.keyCode == KeyCode.TAB) this._tabPressed = true;
+    if (e.keyCode == KeyCode.ENTER && this.state.isKeyboardFocused) {
+      this._handleTouchTap(e);
+    }
+  },
+
+  _handleWindowKeyup: function(e) {
+    if (e.keyCode == KeyCode.SPACE && this.state.isKeyboardFocused) {
+      this._handleTouchTap(e);
+    }
+  },
+
+  _handleBlur: function(e) {
+    this.setState({
+      isKeyboardFocused: false
+    });
+
+    if (this.props.onBlur) this.props.onBlur(e);
+  },
+
+  _handleFocus: function(e) {
+    //setTimeout is needed becuase the focus event fires first
+    //Wait so that we can capture if this was a keyboard focus
+    //or touch focus
+    setTimeout(function() {
+      if (this._tabPressed) {
+        this.setState({
+          isKeyboardFocused: true
+        });
+      }
+    }.bind(this), 150);
+    
+    if (this.props.onFocus) this.props.onFocus(e);
+  },
+
+  _handleTouchTap: function(e) {
+    this._tabPressed = false;
+    this.setState({
+      isKeyboardFocused: false
+    });
+    if (this.props.onTouchTap) this.props.onTouchTap(e);
+  }
+
+});
+
+module.exports = EnhancedButton;
+},{"./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./mixins/window-listenable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\window-listenable.js","./ripples/focus-ripple":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\ripples\\focus-ripple.js","./ripples/touch-ripple":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\ripples\\touch-ripple.js","./utils/key-code":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\key-code.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\enhanced-switch.js":[function(require,module,exports){
+var React = require('react');
+var KeyCode = require('./utils/key-code');
+var Classable = require('./mixins/classable');
+var DomIdable = require('./mixins/dom-idable');
+var WindowListenable = require('./mixins/window-listenable');
+var FocusRipple = require('./ripples/focus-ripple');
+var TouchRipple = require('./ripples/touch-ripple');
+var Paper = require('./paper');
+
+var EnhancedSwitch = React.createClass({displayName: "EnhancedSwitch",
+
+  mixins: [Classable, DomIdable, WindowListenable],
+
+	propTypes: {
+      id: React.PropTypes.string,
+      inputType: React.PropTypes.string.isRequired,
+      switchElement: React.PropTypes.element.isRequired,
+      iconClassName: React.PropTypes.string.isRequired,
+      name: React.PropTypes.string,
+	    value: React.PropTypes.string,
+	    label: React.PropTypes.string,
+	    onSwitch: React.PropTypes.func,
+	    required: React.PropTypes.bool,
+	    disabled: React.PropTypes.bool,
+	    defaultSwitched: React.PropTypes.bool,
+      labelPosition: React.PropTypes.oneOf(['left', 'right']),
+      disableFocusRipple: React.PropTypes.bool,
+      disableTouchRipple: React.PropTypes.bool
+	  },
+
+  windowListeners: {
+    'keydown': '_handleWindowKeydown',
+    'keyup': '_handleWindowKeyup'
+  },
+
+  getDefaultProps: function() {
+    return {
+      iconClassName: ''
+    };
+  },
+
+  getInitialState: function() {
+    return {
+      switched: this.props.defaultSwitched ||
+        (this.props.valueLink && this.props.valueLink.value),
+      isKeyboardFocused: false
+    }
+  },
+
+  componentDidMount: function() {
+    var inputNode = this.refs.checkbox.getDOMNode();
+    this.setState({switched: inputNode.checked});
+  },
+
+  componentWillReceiveProps: function(nextProps) {
+    var hasCheckedLinkProp = nextProps.hasOwnProperty('checkedLink');
+    var hasCheckedProp = nextProps.hasOwnProperty('checked');
+    var hasToggledProp = nextProps.hasOwnProperty('toggled');
+    var hasNewDefaultProp = 
+      (nextProps.hasOwnProperty('defaultSwitched') && 
+      (nextProps.defaultSwitched != this.props.defaultSwitched));
+    var newState = {};
+
+    if (hasCheckedProp) {
+      newState.switched = nextProps.checked;
+    } else if (hasToggledProp) {
+      newState.switched = nextProps.toggled;
+    } else if (hasCheckedLinkProp) {
+      newState.switched = nextProps.checkedLink.value;
+    }
+
+    if (newState) this.setState(newState);
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      this.props,type=$__0.type,name=$__0.name,value=$__0.value,label=$__0.label,onSwitch=$__0.onSwitch,defaultSwitched=$__0.defaultSwitched,onBlur=$__0.onBlur,onFocus=$__0.onFocus,onMouseUp=$__0.onMouseUp,onMouseDown=$__0.onMouseDown,onMouseOut=$__0.onMouseOut,onTouchStart=$__0.onTouchStart,onTouchEnd=$__0.onTouchEnd,disableTouchRipple=$__0.disableTouchRipple,disableFocusRipple=$__0.disableFocusRipple,iconClassName=$__0.iconClassName,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{type:1,name:1,value:1,label:1,onSwitch:1,defaultSwitched:1,onBlur:1,onFocus:1,onMouseUp:1,onMouseDown:1,onMouseOut:1,onTouchStart:1,onTouchEnd:1,disableTouchRipple:1,disableFocusRipple:1,iconClassName:1});
+
+    var classes = this.getClasses('mui-enhanced-switch', {
+      'mui-is-switched': this.state.switched,
+      'mui-is-disabled': this.props.disabled,
+      'mui-is-required': this.props.required
+    });
+
+    var inputId = this.props.id || this.getDomId();
+    
+    var labelElement = this.props.label ? (
+      React.createElement("label", {className: "mui-switch-label", htmlFor: inputId}, 
+        this.props.label
+      )
+    ) : null;
+
+    var inputProps = {
+      ref: "checkbox",
+      type: this.props.inputType,
+      name: this.props.name,
+      value: this.props.value,
+      defaultChecked: this.props.defaultSwitched,
+      onBlur: this._handleBlur,
+      onFocus: this._handleFocus,
+      onMouseUp: this._handleMouseUp,
+      onMouseDown: this._handleMouseDown,
+      onMouseOut: this._handleMouseOut,
+      onTouchStart: this._handleTouchStart,
+      onTouchEnd: this._handleTouchEnd
+    };
+
+    if (!this.props.hasOwnProperty('checkedLink')) {
+      inputProps.onChange = this._handleChange;
+    }
+
+    var inputElement = (
+      React.createElement("input", React.__spread({},  
+        other,  
+        inputProps, 
+        {className: "mui-enhanced-switch-input"}))
+    );
+
+    var touchRipple = (
+      React.createElement(TouchRipple, {
+        ref: "touchRipple", 
+        key: "touchRipple", 
+        centerRipple: true})
+    );
+
+    var focusRipple = (
+      React.createElement(FocusRipple, {
+        key: "focusRipple", 
+        show: this.state.isKeyboardFocused})
+    );
+
+    var ripples = [
+      this.props.disabled || disableTouchRipple ? null : touchRipple,
+      this.props.disabled || disableFocusRipple ? null : focusRipple
+    ];
+
+    iconClassName += ' mui-enhanced-switch-wrap';
+
+    var switchElement = (this.props.iconClassName.indexOf("toggle") == -1) ? (
+        React.createElement("div", {className: iconClassName}, 
+          this.props.switchElement, 
+          ripples
+        )
+      ) : (
+        React.createElement("div", {className: iconClassName}, 
+          React.createElement("div", {className: "mui-toggle-track"}), 
+          React.createElement(Paper, {className: "mui-toggle-thumb", zDepth: 1}, " ", ripples, " ")
+        )      
+    );
+
+    var labelPositionExist = this.props.labelPosition;
+
+    // Position is left if not defined or invalid.
+    var elementsInOrder = (labelPositionExist && 
+      (this.props.labelPosition.toUpperCase() === "RIGHT")) ? (
+        React.createElement("div", null, 
+          switchElement, 
+          labelElement
+        )
+      ) : (
+        React.createElement("div", null, 
+          labelElement, 
+          switchElement
+        )
+    );
+
+    return (
+      React.createElement("div", {className: classes}, 
+          inputElement, 
+          elementsInOrder
+      )
+    );
+  },
+
+
+  isSwitched: function() {
+    return this.refs.checkbox.getDOMNode().checked;
+  },
+
+  // no callback here because there is no event
+  setSwitched: function(newSwitchedValue) {
+    if (!this.props.hasOwnProperty('checked') || this.props.checked == false) {
+      this.setState({switched: newSwitchedValue});  
+      this.refs.checkbox.getDOMNode().checked = newSwitchedValue;
+    } else {
+      var message = 'Cannot call set method while checked is defined as a property.';
+      console.error(message);
+    }
+  },
+
+  getValue: function() {
+    return this.refs.checkbox.getDOMNode().value;
+  },
+
+  isKeyboardFocused: function() {
+    return this.state.isKeyboardFocused;
+  },
+
+  _handleChange: function(e) {
+    
+    this._tabPressed = false;
+    this.setState({
+      isKeyboardFocused: false
+    });
+
+    var isInputChecked = this.refs.checkbox.getDOMNode().checked;
+    
+    if (!this.props.hasOwnProperty('checked')) this.setState({switched: isInputChecked});
+    if (this.props.onSwitch) this.props.onSwitch(e, isInputChecked);
+  },
+
+  /** 
+   * Because both the ripples and the checkbox input cannot share pointer 
+   * events, the checkbox input takes control of pointer events and calls 
+   * ripple animations manually.
+   */
+
+  // Checkbox inputs only use SPACE to change their state. Using ENTER will 
+  // update the ui but not the input.
+  _handleWindowKeydown: function(e) {
+    if (e.keyCode == KeyCode.TAB) this._tabPressed = true;
+    if (e.keyCode == KeyCode.SPACE && this.state.isKeyboardFocused) {
+      this._handleChange(e);
+    }
+  },
+
+  _handleWindowKeyup: function(e) {
+    if (e.keyCode == KeyCode.SPACE && this.state.isKeyboardFocused) {
+      this._handleChange(e);
+    }
+  },
+
+  _handleMouseDown: function(e) {
+    //only listen to left clicks
+    if (e.button === 0) this.refs.touchRipple.start(e);
+  },
+
+  _handleMouseUp: function(e) {
+    this.refs.touchRipple.end();
+  },
+
+  _handleMouseOut: function(e) {
+    this.refs.touchRipple.end();
+  },
+
+  _handleTouchStart: function(e) {
+    this.refs.touchRipple.start(e);
+  },
+
+  _handleTouchEnd: function(e) {
+    this.refs.touchRipple.end();
+  },
+
+  _handleBlur: function(e) {
+    this.setState({
+      isKeyboardFocused: false
+    });
+
+    if (this.props.onBlur) this.props.onBlur(e);
+  },
+
+  _handleFocus: function(e) {
+    //setTimeout is needed becuase the focus event fires first
+    //Wait so that we can capture if this was a keyboard focus
+    //or touch focus
+    setTimeout(function() {
+      if (this._tabPressed) {
+        this.setState({
+          isKeyboardFocused: true
+        });
+      }
+    }.bind(this), 150);
+    
+    if (this.props.onFocus) this.props.onFocus(e);
+  }
+
+});
+
+module.exports = EnhancedSwitch;
+
+},{"./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./mixins/dom-idable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\dom-idable.js","./mixins/window-listenable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\window-listenable.js","./paper":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\paper.js","./ripples/focus-ripple":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\ripples\\focus-ripple.js","./ripples/touch-ripple":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\ripples\\touch-ripple.js","./utils/key-code":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\key-code.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\enhanced-textarea.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('./mixins/classable');
+
+var EnhancedTextarea = React.createClass({displayName: "EnhancedTextarea",
+
+  mixins: [Classable],
+
+  propTypes: {
+    onChange: React.PropTypes.func,
+    onHeightChange: React.PropTypes.func,
+    textareaClassName: React.PropTypes.string,
+    rows: React.PropTypes.number
+  },
+
+  getDefaultProps: function() {
+    return {
+      rows: 1
+    };
+  },
+
+  getInitialState: function() {
+    return {
+      height: this.props.rows * 24
+    };
+  },
+
+  componentDidMount: function() {
+    this._syncHeightWithShadow();
+  },
+
+  render: function() {
+
+    var $__0=
+      
+      
+      
+      
+      
+      
+      
+      this.props,className=$__0.className,onChange=$__0.onChange,onHeightChange=$__0.onHeightChange,textareaClassName=$__0.textareaClassName,rows=$__0.rows,valueLink=$__0.valueLink,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,onChange:1,onHeightChange:1,textareaClassName:1,rows:1,valueLink:1});
+
+    var classes = this.getClasses('mui-enhanced-textarea');
+    var textareaClassName = 'mui-enhanced-textarea-input';
+    var style = {
+      height: this.state.height + 'px'
+    };
+
+    if (this.props.textareaClassName) {
+      textareaClassName += ' ' + this.props.textareaClassName;
+    }
+
+    if (this.props.hasOwnProperty('valueLink')) {
+      other.value = this.props.valueLink.value;
+    }
+
+    return (
+      React.createElement("div", {className: classes}, 
+        React.createElement("textarea", {
+          ref: "shadow", 
+          className: "mui-enhanced-textarea-shadow", 
+          tabIndex: "-1", 
+          rows: this.props.rows, 
+          defaultValue: this.props.defaultValue, 
+          value: this.props.value}), 
+        React.createElement("textarea", React.__spread({}, 
+          other, 
+          {ref: "input", 
+          className: textareaClassName, 
+          rows: this.props.rows, 
+          style: style, 
+          onChange: this._handleChange}))
+      )
+    );
+  },
+
+  getInputNode: function() {
+    return this.refs.input.getDOMNode();
+  },
+
+  _syncHeightWithShadow: function(newValue, e) {
+    var shadow = this.refs.shadow.getDOMNode();
+    var currentHeight = this.state.height;
+    var newHeight;
+
+    if (newValue !== undefined) shadow.value = newValue;
+    newHeight = shadow.scrollHeight;
+
+    if (currentHeight !== newHeight) {
+      this.setState({height: newHeight});
+      if (this.props.onHeightChange) this.props.onHeightChange(e, newHeight);
+    }
+  },
+
+  _handleChange: function(e) {
+    this._syncHeightWithShadow(e.target.value);
+
+    if (this.props.hasOwnProperty('valueLink')) {
+      this.props.valueLink.requestChange(e.target.value);
+    }
+
+    if (this.props.onChange) this.props.onChange(e);
+  }
+});
+
+module.exports = EnhancedTextarea;
+
+},{"./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\flat-button.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('./mixins/classable');
+var EnhancedButton = require('./enhanced-button');
+
+var FlatButton = React.createClass({displayName: "FlatButton",
+
+  mixins: [Classable],
+
+  propTypes: {
+    className: React.PropTypes.string,
+    label: function(props, propName, componentName){
+      if (!props.children && !props.label) {
+        return new Error('Warning: Required prop `label` or `children` was not specified in `'+ componentName + '`.')
+      }
+    },
+    primary: React.PropTypes.bool,
+    secondary: React.PropTypes.bool
+  },
+
+  render: function() {
+    var $__0=
+        
+        
+        
+        
+        this.props,label=$__0.label,primary=$__0.primary,secondary=$__0.secondary,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{label:1,primary:1,secondary:1});
+    var classes = this.getClasses('mui-flat-button', {
+      'mui-is-primary': primary,
+      'mui-is-secondary': !primary && secondary
+    });
+    var children;
+
+    if (label) children = React.createElement("span", {className: "mui-flat-button-label"}, label);
+    else children = this.props.children;
+
+    return (
+      React.createElement(EnhancedButton, React.__spread({},  other, 
+        {className: classes}), 
+        children
+      )
+    );
+  }
+
+});
+
+module.exports = FlatButton;
+},{"./enhanced-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\enhanced-button.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\floating-action-button.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('./mixins/classable');
+var EnhancedButton = require('./enhanced-button');
+var FontIcon = require('./font-icon');
+var Paper = require('./paper');
+
+var RaisedButton = React.createClass({displayName: "RaisedButton",
+
+  mixins: [Classable],
+
+  propTypes: {
+    className: React.PropTypes.string,
+    iconClassName: React.PropTypes.string,
+    mini: React.PropTypes.bool,
+    onMouseDown: React.PropTypes.func,
+    onMouseUp: React.PropTypes.func,
+    onMouseOut: React.PropTypes.func,
+    onTouchEnd: React.PropTypes.func,
+    onTouchStart: React.PropTypes.func,
+    secondary: React.PropTypes.bool
+  },
+
+  getInitialState: function() {
+    var zDepth = this.props.disabled ? 0 : 2;
+    return {
+      zDepth: zDepth,
+      initialZDepth: zDepth
+    };
+  },
+
+  componentDidMount: function() {
+    if (this.props.iconClassName && this.props.children) {
+      var warning = 'You have set both an iconClassName and a child icon. ' +
+                    'It is recommended you use only one method when adding ' +
+                    'icons to FloatingActionButtons.';
+      console.warn(warning);
+    }
+  },
+
+
+  render: function() {
+    var $__0=
+      
+      
+      
+         this.props,icon=$__0.icon,mini=$__0.mini,secondary=$__0.secondary,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{icon:1,mini:1,secondary:1});
+    var classes = this.getClasses('mui-floating-action-button', {
+      'mui-is-mini': mini,
+      'mui-is-secondary': secondary
+    });
+
+    var icon;
+    if (this.props.iconClassName) icon = React.createElement(FontIcon, {className: "mui-floating-action-button-icon " + this.props.iconClassName})
+
+
+    return (
+      React.createElement(Paper, {
+        className: classes, 
+        innerClassName: "mui-floating-action-button-inner", 
+        zDepth: this.state.zDepth, 
+        circle: true}, 
+
+        React.createElement(EnhancedButton, React.__spread({},  other, 
+          {className: "mui-floating-action-button-container", 
+          onMouseDown: this._handleMouseDown, 
+          onMouseUp: this._handleMouseUp, 
+          onMouseOut: this._handleMouseOut, 
+          onTouchStart: this._handleTouchStart, 
+          onTouchEnd: this._handleTouchEnd}), 
+
+          icon, 
+          this.props.children
+
+        )
+        
+      )
+    );
+  },
+
+  _handleMouseDown: function(e) {
+    //only listen to left clicks
+    if (e.button === 0) {
+      this.setState({ zDepth: this.state.initialZDepth + 1 });
+    }
+    if (this.props.onMouseDown) this.props.onMouseDown(e);
+  },
+
+  _handleMouseUp: function(e) {
+    this.setState({ zDepth: this.state.initialZDepth });
+    if (this.props.onMouseUp) this.props.onMouseUp(e);
+  },
+
+  _handleMouseOut: function(e) {
+    this.setState({ zDepth: this.state.initialZDepth });
+    if (this.props.onMouseOut) this.props.onMouseOut(e);
+  },
+
+  _handleTouchStart: function(e) {
+    this.setState({ zDepth: this.state.initialZDepth + 1 });
+    if (this.props.onTouchStart) this.props.onTouchStart(e);
+  },
+
+  _handleTouchEnd: function(e) {
+    this.setState({ zDepth: this.state.initialZDepth });
+    if (this.props.onTouchEnd) this.props.onTouchEnd(e);
+  }
+
+});
+
+module.exports = RaisedButton;
+},{"./enhanced-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\enhanced-button.js","./font-icon":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\font-icon.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./paper":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\paper.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\font-icon.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('./mixins/classable');
+
+var FontIcon = React.createClass({displayName: "FontIcon",
+
+  mixins: [Classable],
+
+  render: function() {
+
+    var $__0=
+      
+      
+      this.props,className=$__0.className,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1});
+    var classes = this.getClasses('mui-font-icon');
+
+    return (
+      React.createElement("span", React.__spread({},  other, {className: classes}))
+    );
+  }
+
+});
+
+module.exports = FontIcon;
+},{"./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\icon-button.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('./mixins/classable');
+var EnhancedButton = require('./enhanced-button');
+var FontIcon = require('./font-icon');
+var Tooltip = require('./tooltip');
+
+var IconButton = React.createClass({displayName: "IconButton",
+
+  mixins: [Classable],
+
+  propTypes: {
+    className: React.PropTypes.string,
+    disabled: React.PropTypes.bool,
+    iconClassName: React.PropTypes.string,
+    onBlur: React.PropTypes.func,
+    onFocus: React.PropTypes.func,
+    tooltip: React.PropTypes.string,
+    touch: React.PropTypes.bool
+  },
+
+  getInitialState: function() {
+    return {
+      tooltipShown: false 
+    };
+  },
+
+  componentDidMount: function() {
+    if (this.props.tooltip) {
+      this._positionTooltip();
+    }
+
+    if (this.props.iconClassName && this.props.children) {
+      var warning = 'You have set both an iconClassName and a child icon. ' +
+                    'It is recommended you use only one method when adding ' +
+                    'icons to IconButtons.';
+      console.warn(warning);
+    }
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+         this.props,tooltip=$__0.tooltip,touch=$__0.touch,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{tooltip:1,touch:1});
+    var classes = this.getClasses('mui-icon-button');
+    var tooltip;
+    var fonticon;
+
+    if (this.props.tooltip) {
+      tooltip = (
+        React.createElement(Tooltip, {
+          ref: "tooltip", 
+          className: "mui-icon-button-tooltip", 
+          label: tooltip, 
+          show: this.state.tooltipShown, 
+          touch: touch})
+      );
+    }
+
+    if (this.props.iconClassName) {
+      fonticon = (
+        React.createElement(FontIcon, {className: this.props.iconClassName})
+      );
+    }
+
+    return (
+      React.createElement(EnhancedButton, React.__spread({},  other, 
+        {ref: "button", 
+        centerRipple: true, 
+        className: classes, 
+        onBlur: this._handleBlur, 
+        onFocus: this._handleFocus, 
+        onMouseOut: this._handleMouseOut, 
+        onMouseOver: this._handleMouseOver}), 
+
+        tooltip, 
+        fonticon, 
+        this.props.children
+
+      )
+    );
+  },
+
+  _positionTooltip: function() {
+    var tooltip = this.refs.tooltip.getDOMNode();
+    var tooltipWidth = tooltip.offsetWidth;
+    var buttonWidth = 48;
+
+    tooltip.style.left = (tooltipWidth - buttonWidth) / 2 * -1 + 'px';
+  },
+
+  _showTooltip: function() {
+    if (!this.props.disabled) this.setState({ tooltipShown: true });
+  },
+
+  _hideTooltip: function() {
+    this.setState({ tooltipShown: false });
+  },
+
+  _handleBlur: function(e) {
+    this._hideTooltip();
+    if (this.props.onBlur) this.props.onBlur(e);
+  },
+
+  _handleFocus: function(e) {
+    this._showTooltip();
+    if (this.props.onFocus) this.props.onFocus(e);
+  },
+
+  _handleMouseOut: function(e) {
+    if (!this.refs.button.isKeyboardFocused()) this._hideTooltip();
+    if (this.props.onMouseOut) this.props.onMouseOut(e);
+  },
+
+  _handleMouseOver: function(e) {
+    this._showTooltip();
+    if (this.props.onMouseOver) this.props.onMouseOver(e);
+  }
+
+});
+
+module.exports = IconButton;
+},{"./enhanced-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\enhanced-button.js","./font-icon":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\font-icon.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./tooltip":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\tooltip.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\ink-bar.js":[function(require,module,exports){
+var React = require('react');
+
+var InkBar = React.createClass({displayName: "InkBar",
+  
+  propTypes: {
+    position: React.PropTypes.string
+  },
+  
+  render: function() {
+
+    var styles = {
+      left: this.props.left,
+      width: this.props.width
+    }
+
+    return (
+      React.createElement("div", {className: "mui-ink-bar", style: styles}, 
+        " "
+      )
+    );
+  }
+
+});
+
+module.exports = InkBar;
+},{"react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\input.js":[function(require,module,exports){
+/** @jsx React.DOM */
+
+var React = require('react');
+var Classable = require('./mixins/classable');
+var classSet = require('react-classset');
+
+var Input = React.createClass({displayName: "Input",
+
+  propTypes: {
+    multiline: React.PropTypes.bool,
+    inlinePlaceholder: React.PropTypes.bool,
+    rows: React.PropTypes.number,
+    inputStyle: React.PropTypes.string,
+    error: React.PropTypes.string,
+    description: React.PropTypes.string,
+    placeholder: React.PropTypes.string,
+    type: React.PropTypes.string,
+    onChange: React.PropTypes.func
+  },
+
+  mixins: [Classable],
+
+  getInitialState: function() {
+    return {
+      value: this.props.defaultValue,
+      rows: this.props.rows
+    };
+  },
+
+  getDefaultProps: function() {
+    return {
+      multiline: false,
+      type: "text"
+    };
+  },
+
+  componentDidMount: function() {
+    console.warn('Input has been deprecated. Please use TextField instead. See http://material-ui.com/#/components/text-fields');
+  },
+
+  render: function() {
+    var classes = this.getClasses('mui-input', {
+      'mui-floating': this.props.inputStyle === 'floating',
+      'mui-text': this.props.type === 'text',
+      'mui-error': this.props.error || false,
+      'mui-disabled': !!this.props.disabled,
+    });
+    var placeholder = this.props.inlinePlaceholder ? this.props.placeholder : "";
+    var inputIsNotEmpty = !!this.state.value;
+    var inputClassName = classSet({
+      'mui-is-not-empty': inputIsNotEmpty
+    });
+    var textareaClassName = classSet({
+      'mui-input-textarea': true,
+      'mui-is-not-empty': inputIsNotEmpty
+    });
+    var inputElement = this.props.multiline ?
+      this.props.valueLink ?
+        React.createElement("textarea", React.__spread({},  this.props, {ref: "input", 
+          className: textareaClassName, 
+          placeholder: placeholder, 
+          rows: this.state.rows})) :
+        React.createElement("textarea", React.__spread({},  this.props, {ref: "input", 
+          value: this.state.value, 
+          className: textareaClassName, 
+          placeholder: placeholder, 
+          rows: this.state.rows, 
+          onChange: this._onTextAreaChange})) :
+        this.props.valueLink ?
+          React.createElement("input", React.__spread({},  this.props, {ref: "input", 
+            className: inputClassName, 
+            placeholder: placeholder})) :
+          React.createElement("input", React.__spread({},  this.props, {ref: "input", 
+            className: inputClassName, 
+            value: this.state.value, 
+            placeholder: placeholder, 
+            onChange: this._onInputChange}));
+    var placeholderSpan = this.props.inlinePlaceholder ? null : 
+      React.createElement("span", {className: "mui-input-placeholder", onClick: this._onPlaceholderClick}, 
+        this.props.placeholder
+      );
+
+    return (
+      React.createElement("div", {ref: this.props.ref, className: classes}, 
+        inputElement, 
+        placeholderSpan, 
+        React.createElement("span", {className: "mui-input-highlight"}), 
+        React.createElement("span", {className: "mui-input-bar"}), 
+        React.createElement("span", {className: "mui-input-description"}, this.props.description), 
+        React.createElement("span", {className: "mui-input-error"}, this.props.error)
+      )
+    );
+  },
+
+  getValue: function() {
+    return this.state.value;
+  },
+
+  setValue: function(txt) {
+    this.setState({value: txt});
+  },
+
+  clearValue: function() {
+    this.setValue('');
+  },
+
+  blur: function() {
+    if(this.isMounted()) this.refs.input.getDOMNode().blur();
+  },
+  
+  focus: function() {
+    if (this.isMounted()) this.refs.input.getDOMNode().focus();
+  },
+
+  _onInputChange: function(e) {
+    var value = e.target.value;
+    this.setState({value: value});
+    if (this.props.onChange) this.props.onChange(e, value);
+  },
+
+  _onPlaceholderClick: function(e) {
+    this.focus();
+  },
+
+  _onTextAreaChange: function(e) {
+    this._onInputChange(e);
+    this._onLineBreak(e);
+  },
+
+  _onLineBreak: function(e) {
+    var value = e.target.value;
+    var lines = value.split('\n').length;
+
+    if (lines > this.state.rows) {
+      if (this.state.rows !== 20) {
+        this.setState({ rows: ((this.state.rows) + 1)});
+      }
+    }
+  }
+
+});
+
+module.exports = Input;
+
+},{"./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react-classset":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\node_modules\\react-classset\\classSet.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\left-nav.js":[function(require,module,exports){
+var React = require('react'),
+  KeyCode = require('./utils/key-code'),
+  Classable = require('./mixins/classable'),
+  WindowListenable = require('./mixins/window-listenable'),
+  Overlay = require('./overlay'),
+  Paper = require('./paper'),
+  Menu = require('./menu');
+
+var LeftNav = React.createClass({displayName: "LeftNav",
+
+  mixins: [Classable, WindowListenable],
+
+  propTypes: {
+    docked: React.PropTypes.bool,
+    header: React.PropTypes.element,
+    onChange: React.PropTypes.func,
+    menuItems: React.PropTypes.array.isRequired,
+    selectedIndex: React.PropTypes.number
+  },
+
+  windowListeners: {
+    'keyup': '_onWindowKeyUp'
+  },
+
+  getDefaultProps: function() {
+    return {
+      docked: true
+    };
+  },
+
+  getInitialState: function() {
+    return {
+      open: this.props.docked
+    };
+  },
+
+  toggle: function() {
+    this.setState({ open: !this.state.open });
+    return this;
+  },
+
+  close: function() {
+    this.setState({ open: false });
+    return this;
+  },
+
+  open: function() {
+    this.setState({ open: true });
+    return this;
+  },
+
+  render: function() {
+    var classes = this.getClasses('mui-left-nav', {
+        'mui-closed': !this.state.open
+      }),
+      selectedIndex = this.props.selectedIndex,
+      overlay;
+
+    if (!this.props.docked) overlay = React.createElement(Overlay, {show: this.state.open, onTouchTap: this._onOverlayTouchTap});
+
+    return (
+      React.createElement("div", {className: classes}, 
+
+        overlay, 
+        React.createElement(Paper, {
+          ref: "clickAwayableElement", 
+          className: "mui-left-nav-menu", 
+          zDepth: 2, 
+          rounded: false}, 
+          
+          this.props.header, 
+          React.createElement(Menu, {
+            ref: "menuItems", 
+            zDepth: 0, 
+            menuItems: this.props.menuItems, 
+            selectedIndex: selectedIndex, 
+            onItemClick: this._onMenuItemClick})
+
+        )
+      )
+    );
+  },
+
+  _onMenuItemClick: function(e, key, payload) {
+    if (!this.props.docked) this.close();
+    if (this.props.onChange && this.props.selectedIndex !== key) {
+      this.props.onChange(e, key, payload);
+    }
+  },
+
+  _onOverlayTouchTap: function() {
+    this.close();
+  },
+
+  _onWindowKeyUp: function(e) {
+    if (e.keyCode == KeyCode.ESC &&
+        !this.props.docked &&
+        this.state.open) {
+      this.close();
+    }
+  }
+
+});
+
+module.exports = LeftNav;
+},{"./menu":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\menu.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./mixins/window-listenable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\window-listenable.js","./overlay":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\overlay.js","./paper":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\paper.js","./utils/key-code":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\key-code.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\menu-item.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('./mixins/classable');
+var FontIcon = require('./font-icon');
+var Toggle = require('./toggle');
+
+var Types = {
+  LINK: 'LINK',
+  SUBHEADER: 'SUBHEADER',
+  NESTED: 'NESTED'
+};
+
+var MenuItem = React.createClass({displayName: "MenuItem",
+
+  mixins: [Classable],
+
+  propTypes: {
+    index: React.PropTypes.number.isRequired,
+    iconClassName: React.PropTypes.string,
+    iconRightClassName: React.PropTypes.string,
+    attribute: React.PropTypes.string,
+    number: React.PropTypes.string,
+    data: React.PropTypes.string,
+    toggle: React.PropTypes.bool,
+    onTouchTap: React.PropTypes.func,
+    onClick: React.PropTypes.func,
+    onToggle: React.PropTypes.func,
+    selected: React.PropTypes.bool
+  },
+
+  statics: {
+    Types: Types
+  },
+
+  getDefaultProps: function() {
+    return {
+      toggle: false
+    };
+  },
+
+  render: function() {
+    var classes = this.getClasses('mui-menu-item', {
+      'mui-is-selected': this.props.selected
+    });
+    var icon;
+    var data;
+    var iconRight;
+    var attribute;
+    var number;
+    var toggle;
+
+    if (this.props.iconClassName) icon = React.createElement(FontIcon, {className: 'mui-menu-item-icon ' + this.props.iconClassName});
+    if (this.props.iconRightClassName) iconRight = React.createElement(FontIcon, {className: 'mui-menu-item-icon-right ' + this.props.iconRightClassName});
+    if (this.props.data) data = React.createElement("span", {className: "mui-menu-item-data"}, this.props.data);
+    if (this.props.number !== undefined) number = React.createElement("span", {className: "mui-menu-item-number"}, this.props.number);
+    if (this.props.attribute !== undefined) attribute = React.createElement("span", {className: "mui-menu-item-attribute"}, this.props.attribute);
+    
+    if (this.props.toggle) {
+      var $__0=
+        
+        
+        
+        
+        
+        
+        this.props,toggle=$__0.toggle,onClick=$__0.onClick,onToggle=$__0.onToggle,children=$__0.children,label=$__0.label,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{toggle:1,onClick:1,onToggle:1,children:1,label:1});
+      toggle = React.createElement(Toggle, React.__spread({},  other, {onToggle: this._handleToggle}));
+    }
+
+    return (
+      React.createElement("div", {
+        key: this.props.index, 
+        className: classes, 
+        onTouchTap: this._handleTouchTap, 
+        onClick: this._handleOnClick}, 
+
+        icon, 
+        this.props.children, 
+        data, 
+        attribute, 
+        number, 
+        toggle, 
+        iconRight
+        
+      )
+    );
+  },
+
+  _handleTouchTap: function(e) {
+    if (this.props.onTouchTap) this.props.onTouchTap(e, this.props.index);
+  },
+
+  _handleOnClick: function(e) {
+    if (this.props.onClick) this.props.onClick(e, this.props.index);
+  },
+
+  _handleToggle: function(e, toggled) {
+    if (this.props.onToggle) this.props.onToggle(e, this.props.index, toggled);
+  }
+
+});
+
+module.exports = MenuItem;
+
+},{"./font-icon":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\font-icon.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./toggle":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\toggle.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\menu.js":[function(require,module,exports){
+var React = require('react');
+var CssEvent = require('./utils/css-event');
+var Dom = require('./utils/dom');
+var KeyLine = require('./utils/key-line');
+var Classable = require('./mixins/classable');
+var ClickAwayable = require('./mixins/click-awayable');
+var Paper = require('./paper');
+var MenuItem = require('./menu-item');
+
+/***********************
+ * Nested Menu Component
+ ***********************/
+var NestedMenuItem = React.createClass({displayName: "NestedMenuItem",
+
+  mixins: [Classable, ClickAwayable],
+
+  propTypes: {
+    index: React.PropTypes.number.isRequired,
+    text: React.PropTypes.string,
+    menuItems: React.PropTypes.array.isRequired,
+    zDepth: React.PropTypes.number,
+    onItemClick: React.PropTypes.func,
+    onItemTap: React.PropTypes.func
+  },
+
+  getInitialState: function() {
+    return { open: false }
+  },
+
+  componentClickAway: function() {
+    this.setState({ open: false });
+  },
+
+  componentDidMount: function() {
+    this._positionNestedMenu();
+  },
+
+  componentDidUpdate: function(prevProps, prevState) {
+    this._positionNestedMenu();
+  },
+
+  render: function() {
+    var classes = this.getClasses('mui-nested-menu-item', {
+      'mui-open': this.state.open
+    });
+
+    return (
+      React.createElement("div", {className: classes}, 
+        React.createElement(MenuItem, {index: this.props.index, iconRightClassName: "muidocs-icon-custom-arrow-drop-right", onClick: this._onParentItemClick}, 
+          this.props.text
+        ), 
+        React.createElement(Menu, {
+          ref: "nestedMenu", 
+          menuItems: this.props.menuItems, 
+          onItemClick: this._onMenuItemClick, 
+          onItemTap: this._onMenuItemTap, 
+          hideable: true, 
+          visible: this.state.open, 
+          zDepth: this.props.zDepth + 1})
+      )
+    );
+  },
+
+  _positionNestedMenu: function() {
+    var el = this.getDOMNode(),
+      nestedMenu = this.refs.nestedMenu.getDOMNode();
+
+    nestedMenu.style.left = el.offsetWidth + 'px';
+  },
+
+  _onParentItemClick: function() {
+    this.setState({ open: !this.state.open });
+  },
+
+  _onMenuItemClick: function(e, index, menuItem) {
+    this.setState({ open: false });
+    if (this.props.onItemClick) this.props.onItemClick(e, index, menuItem);
+  },
+  
+  _onMenuItemTap: function(e, index, menuItem) {
+    this.setState({ open: false });
+    if (this.props.onItemTap) this.props.onItemTap(e, index, menuItem);
+  }
+
+});
+
+/****************
+ * Menu Component
+ ****************/
+var Menu = React.createClass({displayName: "Menu",
+
+  mixins: [Classable],
+
+  propTypes: {
+    autoWidth: React.PropTypes.bool,
+    onItemTap: React.PropTypes.func,
+    onItemClick: React.PropTypes.func,
+    onToggleClick: React.PropTypes.func,
+    menuItems: React.PropTypes.array.isRequired,
+    selectedIndex: React.PropTypes.number,
+    hideable: React.PropTypes.bool,
+    visible: React.PropTypes.bool,
+    zDepth: React.PropTypes.number
+  },
+
+  getInitialState: function() {
+    return { nestedMenuShown: false }
+  },
+
+  getDefaultProps: function() {
+    return {
+      autoWidth: true,
+      hideable: false,
+      visible: true,
+      zDepth: 1
+    };
+  },
+
+  componentDidMount: function() {
+    var el = this.getDOMNode();
+
+    //Set the menu with
+    this._setKeyWidth(el);
+
+    //Save the initial menu height for later
+    this._initialMenuHeight = el.offsetHeight + KeyLine.Desktop.GUTTER_LESS;
+
+    //Show or Hide the menu according to visibility
+    this._renderVisibility();
+  },
+
+  componentDidUpdate: function(prevProps, prevState) {
+    if (this.props.visible !== prevProps.visible) this._renderVisibility();
+  },
+
+  render: function() {
+    var classes = this.getClasses('mui-menu', {
+      'mui-menu-hideable': this.props.hideable,
+      'mui-visible': this.props.visible
+    });
+
+    return (
+      React.createElement(Paper, {ref: "paperContainer", zDepth: this.props.zDepth, className: classes}, 
+        this._getChildren()
+      )
+    );
+  },
+
+  _getChildren: function() {
+    var children = [],
+      menuItem,
+      itemComponent,
+      isSelected;
+
+    //This array is used to keep track of all nested menu refs
+    this._nestedChildren = [];
+
+    for (var i=0; i < this.props.menuItems.length; i++) {
+      menuItem = this.props.menuItems[i];
+      isSelected = i === this.props.selectedIndex;
+
+      var $__0=
+        
+        
+        
+        
+        
+        
+        
+        menuItem,icon=$__0.icon,data=$__0.data,attribute=$__0.attribute,number=$__0.number,toggle=$__0.toggle,onClick=$__0.onClick,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{icon:1,data:1,attribute:1,number:1,toggle:1,onClick:1});
+
+      switch (menuItem.type) {
+
+        case MenuItem.Types.LINK:
+          itemComponent = (
+            React.createElement("a", {key: i, index: i, className: "mui-menu-item", href: menuItem.payload}, menuItem.text)
+          );
+        break;
+
+        case MenuItem.Types.SUBHEADER:
+          itemComponent = (
+            React.createElement("div", {key: i, index: i, className: "mui-subheader"}, menuItem.text)
+          );
+          break;
+
+        case MenuItem.Types.NESTED:
+          itemComponent = (
+            React.createElement(NestedMenuItem, {
+              ref: i, 
+              key: i, 
+              index: i, 
+              text: menuItem.text, 
+              menuItems: menuItem.items, 
+              zDepth: this.props.zDepth, 
+              onItemClick: this._onNestedItemClick, 
+              onItemTap: this._onNestedItemClick})
+          );
+          this._nestedChildren.push(i);
+          break;
+
+        default:
+          itemComponent = (
+            React.createElement(MenuItem, React.__spread({}, 
+              other, 
+              {selected: isSelected, 
+              key: i, 
+              index: i, 
+              icon: menuItem.icon, 
+              data: menuItem.data, 
+              attribute: menuItem.attribute, 
+              number: menuItem.number, 
+              toggle: menuItem.toggle, 
+              onClick: this._onItemClick, 
+              onTouchTap: this._onItemTap}), 
+              menuItem.text
+            )
+          );
+      }
+      children.push(itemComponent);
+    }
+
+    return children;
+  },
+
+  _setKeyWidth: function(el) {
+    var menuWidth = this.props.autoWidth ?
+      KeyLine.getIncrementalDim(el.offsetWidth) + 'px' :
+      '100%';
+
+    //Update the menu width
+    Dom.withoutTransition(el, function() {
+      el.style.width = menuWidth;
+    });
+  },
+
+  _renderVisibility: function() {
+    var el;
+
+    if (this.props.hideable) {
+      el = this.getDOMNode();
+      var innerContainer = this.refs.paperContainer.getInnerContainer().getDOMNode();
+      
+      if (this.props.visible) {
+
+        //Open the menu
+        el.style.height = this._initialMenuHeight + 'px';
+
+        //Set the overflow to visible after the animation is done so
+        //that other nested menus can be shown
+        CssEvent.onTransitionEnd(el, function() {
+          //Make sure the menu is open before setting the overflow.
+          //This is to accout for fast clicks
+          if (this.props.visible) innerContainer.style.overflow = 'visible';
+        }.bind(this));
+
+      } else {
+
+        //Close the menu
+        el.style.height = '0px';
+
+        //Set the overflow to hidden so that animation works properly
+        innerContainer.style.overflow = 'hidden';
+      }
+    }
+  },
+
+  _onNestedItemClick: function(e, index, menuItem) {
+    if (this.props.onItemClick) this.props.onItemClick(e, index, menuItem);
+  },
+
+  _onNestedItemTap: function(e, index, menuItem) {
+    if (this.props.onItemTap) this.props.onItemTap(e, index, menuItem);
+  },
+
+  _onItemClick: function(e, index) {
+    if (this.props.onItemClick) this.props.onItemClick(e, index, this.props.menuItems[index]);
+  },
+
+  _onItemTap: function(e, index) {
+    if (this.props.onItemTap) this.props.onItemTap(e, index, this.props.menuItems[index]);
+  },
+
+  _onItemToggle: function(e, index, toggled) {
+    if (this.props.onItemToggle) this.props.onItemToggle(e, index, this.props.menuItems[index], toggled);
+  }
+
+});
+
+module.exports = Menu;
+},{"./menu-item":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\menu-item.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./mixins/click-awayable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\click-awayable.js","./paper":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\paper.js","./utils/css-event":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\css-event.js","./utils/dom":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\dom.js","./utils/key-line":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\key-line.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js":[function(require,module,exports){
+var React = require('react');
+var classSet = require('react-classset');
+
+module.exports = {
+
+  propTypes: {
+    className: React.PropTypes.string
+  },
+
+  getClasses: function(initialClasses, additionalClassObj) {
+    var classString = '';
+
+    //Initialize the classString with the classNames that were passed in
+    if (this.props.className) classString += ' ' + this.props.className;
+
+    //Add in initial classes
+    if (typeof initialClasses === 'object') {
+      classString += ' ' + classSet(initialClasses);
+    } else {
+      classString += ' ' + initialClasses;
+    }
+
+    //Add in additional classes
+    if (additionalClassObj) classString += ' ' + classSet(additionalClassObj);
+
+    //Convert the class string into an object and run it through the class set
+    return classSet(this.getClassSet(classString));
+  },
+
+  getClassSet: function(classString) {
+    var classObj = {};
+
+    if (classString) {
+      classString.split(' ').forEach(function(className) {
+        if (className) classObj[className] = true;
+      });
+    }
+
+    return classObj;
+  }
+
+}
+
+},{"react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react-classset":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\node_modules\\react-classset\\classSet.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\click-awayable.js":[function(require,module,exports){
+var Events = require('../utils/events');
+var Dom = require('../utils/dom');
+
+module.exports = {
+
+  //When the component mounts, listen to click events and check if we need to
+  //Call the componentClickAway function.
+  componentDidMount: function() {
+    if (!this.manuallyBindClickAway) this._bindClickAway();
+  },
+
+  componentWillUnmount: function() {
+    this._unbindClickAway();
+  },
+
+  _checkClickAway: function(e) {
+    var el = this.getDOMNode();
+
+    // Check if the target is inside the current component
+    if (this.isMounted() && 
+      e.target != el &&
+      !Dom.isDescendant(el, e.target)) {
+      if (this.componentClickAway) this.componentClickAway();
+    }
+  },
+
+  _bindClickAway: function() {
+    Events.on(document, 'click', this._checkClickAway);
+  },
+
+  _unbindClickAway: function() {
+    Events.off(document, 'click', this._checkClickAway);
+  }
+
+};
+
+},{"../utils/dom":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\dom.js","../utils/events":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\events.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\dom-idable.js":[function(require,module,exports){
+module.exports = {
+
+  getDomId: function() {
+    return 'dom_id' + this._rootNodeID.replace(/\./g, '_');
+  }
+  
+}
+},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\window-listenable.js":[function(require,module,exports){
+var Events = require('../utils/events');
+
+module.exports = {
+
+  componentDidMount: function() {
+    var listeners = this.windowListeners;
+
+    for (var eventName in listeners) {
+       var callbackName = listeners[eventName];
+       Events.on(window, eventName, this[callbackName]);
+    }
+  },
+
+  componentWillUnmount: function() {
+    var listeners = this.windowListeners;
+
+    for (var eventName in listeners) {
+       var callbackName = listeners[eventName];
+       Events.off(window, eventName, this[callbackName]);
+    }
+  }
+  
+}
+},{"../utils/events":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\events.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\overlay.js":[function(require,module,exports){
+var React = require('react'),
+  Classable = require('./mixins/classable');
+
+var Overlay = React.createClass({displayName: "Overlay",
+
+  mixins: [Classable],
+
+  propTypes: {
+    show: React.PropTypes.bool
+  },
+
+  render: function() {
+    var 
+      $__0=
+        
+        
+        this.props,className=$__0.className,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1}),
+      classes = this.getClasses('mui-overlay', {
+        'mui-is-shown': this.props.show
+      });
+
+    return (
+      React.createElement("div", React.__spread({},  other, {className: classes}))
+    );
+  }
+
+});
+
+module.exports = Overlay;
+},{"./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\paper.js":[function(require,module,exports){
+var React = require('react'),
+  Classable = require('./mixins/classable');
+
+var Paper = React.createClass({displayName: "Paper",
+
+  mixins: [Classable],
+
+  propTypes: {
+    circle: React.PropTypes.bool,
+    innerClassName: React.PropTypes.string,
+    rounded: React.PropTypes.bool,
+    zDepth: React.PropTypes.oneOf([0,1,2,3,4,5])
+  },
+
+  getDefaultProps: function() {
+    return {
+      innerClassName: '',
+      rounded: true,
+      zDepth: 1
+    };
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+      
+      
+      
+         this.props,className=$__0.className,circle=$__0.circle,innerClassName=$__0.innerClassName,rounded=$__0.rounded,zDepth=$__0.zDepth,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,circle:1,innerClassName:1,rounded:1,zDepth:1}),
+      classes = this.getClasses(
+        'mui-paper ' +
+        'mui-z-depth-' + this.props.zDepth, { 
+        'mui-rounded': this.props.rounded,
+        'mui-circle': this.props.circle
+      }),
+      insideClasses = 
+        this.props.innerClassName + ' ' +
+        'mui-paper-container ' +
+        'mui-z-depth-bottom';
+
+    return (
+      React.createElement("div", React.__spread({},  other, {className: classes}), 
+        React.createElement("div", {ref: "innerContainer", className: insideClasses}, 
+          this.props.children
+        )
+      )
+    );
+  },
+
+  getInnerContainer: function() {
+    return this.refs.innerContainer;
+  }
+
+});
+
+module.exports = Paper;
+},{"./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\radio-button-group.js":[function(require,module,exports){
+var React = require('react');
+var Paper = require('./paper');
+var Classable = require('./mixins/classable');
+var EnhancedSwitch = require('./enhanced-switch');
+var RadioButton = require('./radio-button');
+
+var RadioButtonGroup = React.createClass({displayName: "RadioButtonGroup",
+
+	mixins: [Classable],
+
+	propTypes: {
+		name: React.PropTypes.string.isRequired,
+    valueSelected: React.PropTypes.string,
+    defaultSelected: React.PropTypes.string,
+    labelPosition: React.PropTypes.oneOf(['left', 'right']),
+		onChange: React.PropTypes.func
+	},
+
+  _hasCheckAttribute: function(radioButton) {
+    return radioButton.props.hasOwnProperty('checked') && 
+      radioButton.props.checked; 
+  },
+
+  getInitialState: function() {
+    return {
+      numberCheckedRadioButtons: 0,
+      selected: this.props.valueSelected || this.props.defaultSelected || ''
+    };
+  },
+
+  componentWillMount: function() {
+    var cnt = 0;
+    
+    this.props.children.forEach(function(option) {
+      if (this._hasCheckAttribute(option)) cnt++;
+    }, this);
+
+    this.setState({numberCheckedRadioButtons: cnt});
+  }, 
+
+  componentWillReceiveProps: function(nextProps) {
+    if (nextProps.hasOwnProperty('valueSelected')) {
+      this.setState({selected: nextProps.valueSelected});
+    }
+  },
+
+	render: function() {
+
+    var options = this.props.children.map(function(option) {
+      
+      var $__0=
+        
+         
+        
+        
+        
+        option.props,name=$__0.name,value=$__0.value,label=$__0.label,onCheck=$__0.onCheck,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{name:1,value:1,label:1,onCheck:1});
+
+      return React.createElement(RadioButton, React.__spread({}, 
+        other, 
+        {ref: option.props.value, 
+        name: this.props.name, 
+        key: option.props.value, 
+        value: option.props.value, 
+        label: option.props.label, 
+        labelPosition: this.props.labelPosition, 
+        onCheck: this._onChange, 
+        checked: option.props.value == this.state.selected}))
+
+		}, this);
+
+		return (
+			React.createElement("div", null, 
+				options
+			)
+		);
+	},
+
+  _updateRadioButtons: function(newSelection) {
+    if (this.state.numberCheckedRadioButtons == 0) {
+      this.setState({selected: newSelection});
+    } else {
+        var message = "Cannot select a different radio button while another radio button " + 
+                      "has the 'checked' property set to true.";
+        console.error(message);
+    }
+  },
+
+	_onChange: function(e, newSelection) {
+    this._updateRadioButtons(newSelection);
+
+    // Successful update
+    if (this.state.numberCheckedRadioButtons == 0) {
+      if (this.props.onChange) this.props.onChange(e, newSelection);
+    }
+	},
+
+  getSelectedValue: function() {
+    return this.state.selected;
+  },
+
+  setSelectedValue: function(newSelection) {
+    this._updateRadioButtons(newSelection);  
+  },
+
+  clearValue: function() {
+    this.setSelectedValue('');  
+  }
+
+});
+
+module.exports = RadioButtonGroup;
+
+},{"./enhanced-switch":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\enhanced-switch.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./paper":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\paper.js","./radio-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\radio-button.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\radio-button.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('./mixins/classable');
+var EnhancedSwitch = require('./enhanced-switch');
+var RadioButtonOff = require('./svg-icons/toggle-radio-button-off');
+var RadioButtonOn = require('./svg-icons/toggle-radio-button-on');
+
+var RadioButton = React.createClass({displayName: "RadioButton",
+
+  mixins: [Classable],
+
+  propTypes: {
+    onCheck: React.PropTypes.func
+  },
+
+  render: function() {
+
+    var $__0=
+      
+      
+      this.props,onCheck=$__0.onCheck,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{onCheck:1});
+
+    var radioButtonElement = (
+      React.createElement("div", null, 
+          React.createElement(RadioButtonOff, {className: "mui-radio-button-target"}), 
+          React.createElement(RadioButtonOn, {className: "mui-radio-button-fill"})
+      )
+    );
+
+    var enhancedSwitchProps = {
+      ref: "enhancedSwitch",
+      inputType: "radio",
+      switchElement: radioButtonElement,
+      className: "mui-radio-button",
+      iconClassName: "mui-radio-button-icon",
+      onSwitch: this._handleCheck,
+      labelPosition: (this.props.labelPosition) ? this.props.labelPosition : "right"
+    };
+
+    return (
+      React.createElement(EnhancedSwitch, React.__spread({},  
+        other, 
+        enhancedSwitchProps))
+    );
+  },
+
+  // Only called when selected, not when unselected.
+  _handleCheck: function(e) {
+    if (this.props.onCheck) this.props.onCheck(e, this.props.value);
+  },
+
+  isChecked: function() {
+    return this.refs.enhancedSwitch.isSwitched();
+  },
+
+  setChecked: function(newCheckedValue) {
+    this.refs.enhancedSwitch.setSwitched(newCheckedValue);
+    this.setState({switched: newCheckedValue});
+  },
+  
+  getValue: function() {
+    return this.refs.enhancedSwitch.getValue();
+  }
+});
+
+module.exports = RadioButton;
+
+},{"./enhanced-switch":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\enhanced-switch.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./svg-icons/toggle-radio-button-off":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\toggle-radio-button-off.js","./svg-icons/toggle-radio-button-on":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\toggle-radio-button-on.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\raised-button.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('./mixins/classable');
+var EnhancedButton = require('./enhanced-button');
+var Paper = require('./paper');
+
+var RaisedButton = React.createClass({displayName: "RaisedButton",
+
+  mixins: [Classable],
+
+  propTypes: {
+    className: React.PropTypes.string,
+    label: function(props, propName, componentName){
+      if (!props.children && !props.label) {
+        return new Error('Warning: Required prop `label` or `children` was not specified in `'+ componentName + '`.')
+      }
+    },
+    onMouseDown: React.PropTypes.func,
+    onMouseUp: React.PropTypes.func,
+    onMouseOut: React.PropTypes.func,
+    onTouchEnd: React.PropTypes.func,
+    onTouchStart: React.PropTypes.func,
+    primary: React.PropTypes.bool,
+    secondary: React.PropTypes.bool
+  },
+
+  getInitialState: function() {
+    var zDepth = this.props.disabled ? 0 : 1;
+    return {
+      zDepth: zDepth,
+      initialZDepth: zDepth
+    };
+  },
+
+  componentWillReceiveProps: function(nextProps) {
+    var zDepth = nextProps.disabled ? 0 : 1;
+    this.setState({
+      zDepth: zDepth,
+      initialZDepth: zDepth
+    });
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+      
+         this.props,label=$__0.label,primary=$__0.primary,secondary=$__0.secondary,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{label:1,primary:1,secondary:1});
+    var classes = this.getClasses('mui-raised-button', {
+      'mui-is-primary': primary,
+      'mui-is-secondary': !primary && secondary
+    });
+    var children;
+
+    if (label) children = React.createElement("span", {className: "mui-raised-button-label"}, label);
+    else children = this.props.children;
+
+    return (
+      React.createElement(Paper, {className: classes, zDepth: this.state.zDepth}, 
+        React.createElement(EnhancedButton, React.__spread({},  other, 
+          {className: "mui-raised-button-container", 
+          onMouseUp: this._handleMouseUp, 
+          onMouseDown: this._handleMouseDown, 
+          onMouseOut: this._handleMouseOut, 
+          onTouchStart: this._handleTouchStart, 
+          onTouchEnd: this._handleTouchEnd}), 
+          children
+        )
+      )
+    );
+  },
+
+  _handleMouseDown: function(e) {
+    //only listen to left clicks
+    if (e.button === 0) {
+      this.setState({ zDepth: this.state.initialZDepth + 1 });
+    }
+    if (this.props.onMouseDown) this.props.onMouseDown(e);
+  },
+
+  _handleMouseUp: function(e) {
+    this.setState({ zDepth: this.state.initialZDepth });
+    if (this.props.onMouseUp) this.props.onMouseUp(e);
+  },
+
+  _handleMouseOut: function(e) {
+    this.setState({ zDepth: this.state.initialZDepth });
+    if (this.props.onMouseOut) this.props.onMouseOut(e);
+  },
+
+  _handleTouchStart: function(e) {
+    this.setState({ zDepth: this.state.initialZDepth + 1 });
+    if (this.props.onTouchStart) this.props.onTouchStart(e);
+  },
+
+  _handleTouchEnd: function(e) {
+    this.setState({ zDepth: this.state.initialZDepth });
+    if (this.props.onTouchEnd) this.props.onTouchEnd(e);
+  }
+
+});
+
+module.exports = RaisedButton;
+},{"./enhanced-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\enhanced-button.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./paper":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\paper.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\ripples\\circle.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('../mixins/classable');
+
+var RippleCircle = React.createClass({displayName: "RippleCircle",
+
+  mixins: [Classable],
+
+  propTypes: {
+    className: React.PropTypes.string,
+    started: React.PropTypes.bool,
+    ending: React.PropTypes.bool
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+      
+      
+      this.props,innerClassName=$__0.innerClassName,started=$__0.started,ending=$__0.ending,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{innerClassName:1,started:1,ending:1});
+    var classes = this.getClasses('mui-ripple-circle', {
+      'mui-is-started': this.props.started,
+      'mui-is-ending': this.props.ending
+    });
+
+    return (
+      React.createElement("div", React.__spread({},  other, {className: classes}), 
+        React.createElement("div", {className: "mui-ripple-circle-inner"})
+      )
+    );
+  }
+
+});
+
+module.exports = RippleCircle;
+},{"../mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\ripples\\focus-ripple.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('../mixins/classable');
+
+var FocusRipple = React.createClass({displayName: "FocusRipple",
+
+  mixins: [Classable],
+
+  propTypes: {
+    show: React.PropTypes.bool
+  },
+
+  componentDidMount: function() {
+    this._setRippleSize();
+  },
+
+  render: function() {
+    var classes = this.getClasses('mui-focus-ripple', {
+      'mui-is-shown': this.props.show
+    });
+
+    return (
+      React.createElement("div", {className: classes}, 
+        React.createElement("div", {className: "mui-focus-ripple-inner"})
+      )
+    );
+  },
+
+  _setRippleSize: function() {
+    var el = this.getDOMNode();
+    var height = el.offsetHeight;
+    var width = el.offsetWidth;
+    var size = Math.max(height, width);
+
+    el.style.height = size + 'px';
+    el.style.top = (size / 2 * -1) + (height / 2) + 'px';
+  }
+
+});
+
+module.exports = FocusRipple;
+},{"../mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\ripples\\touch-ripple.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('../mixins/classable');
+var Dom = require('../utils/dom');
+var RippleCircle = require('./circle');
+
+var TouchRipple = React.createClass({displayName: "TouchRipple",
+
+  mixins: [Classable],
+
+  propTypes: {
+    centerRipple: React.PropTypes.bool,
+    className: React.PropTypes.string
+  },
+
+  getInitialState: function() {
+    return {
+      ripples: [{
+        key: 0,
+        started: false,
+        ending: false
+      }]
+    };
+  },
+
+  render: function() {
+    var classes = this.getClasses('mui-touch-ripple');
+
+    return (
+      React.createElement("div", {
+        onMouseUp: this._handleMouseUp, 
+        onMouseDown: this._handleMouseDown, 
+        onMouseOut: this._handleMouseOut, 
+        onTouchStart: this._handleTouchStart, 
+        onTouchEnd: this._handleTouchEnd}, 
+        React.createElement("div", {className: classes}, 
+          this._getRippleElements()
+        ), 
+        this.props.children
+      )
+    );
+  },
+
+  start: function(e) {
+    var ripples = this.state.ripples;
+    var nextKey = ripples[ripples.length-1].key + 1;
+    var style = !this.props.centerRipple ? this._getRippleStyle(e) : {};
+    var ripple;
+
+    //Start the next unstarted ripple
+    for (var i = 0; i < ripples.length; i++) {
+      ripple = ripples[i];
+      if (!ripple.started) {
+        ripple.started = true;
+        ripple.style = style;
+        break;
+      }
+    };
+
+    //Add an unstarted ripple at the end
+    ripples.push({
+      key: nextKey,
+      started: false,
+      ending: false
+    });
+
+    //Re-render
+    this.setState({
+      ripples: ripples
+    });
+  },
+
+  end: function() {
+    var ripples = this.state.ripples;
+    var ripple;
+    var endingRipple;
+
+    //End the the next un-ended ripple
+    for (var i = 0; i < ripples.length; i++) {
+      ripple = ripples[i];
+      if (ripple.started && !ripple.ending) {
+        ripple.ending = true;
+        endingRipple = ripple;
+        break;
+      }
+    };
+
+    //Only update if a ripple was found
+    if (endingRipple) {
+      //Re-render
+      this.setState({
+        ripples: ripples
+      });
+
+      //Wait 2 seconds and remove the ripple from DOM
+      setTimeout(function() {
+        ripples.shift();
+        if (this.isMounted()) {
+          this.setState({
+            ripples: ripples
+          });
+        }
+      }.bind(this), 2000);
+    }
+  },
+
+  _handleMouseDown: function(e) {
+    //only listen to left clicks
+    if (e.button === 0) this.start(e);
+  },
+
+  _handleMouseUp: function(e) {
+    this.end();
+  },
+
+  _handleMouseOut: function(e) {
+    this.end();
+  },
+
+  _handleTouchStart: function(e) {
+    this.start(e);
+  },
+
+  _handleTouchEnd: function(e) {
+    this.end();
+  },
+
+  _getRippleStyle: function(e) {
+    var style = {};
+    var el = this.getDOMNode();
+    var elHeight = el.offsetHeight;
+    var elWidth = el.offsetWidth;
+    var offset = Dom.offset(el);
+    var pageX = e.pageX == undefined ? e.nativeEvent.pageX : e.pageX;
+    var pageY = e.pageY == undefined ? e.nativeEvent.pageY : e.pageY;
+    var pointerX = pageX - offset.left;
+    var pointerY = pageY - offset.top;
+    var topLeftDiag = this._calcDiag(pointerX, pointerY);
+    var topRightDiag = this._calcDiag(elWidth - pointerX, pointerY);
+    var botRightDiag = this._calcDiag(elWidth - pointerX, elHeight - pointerY);
+    var botLeftDiag = this._calcDiag(pointerX, elHeight - pointerY);
+    var rippleRadius = Math.max(
+      topLeftDiag, topRightDiag, botRightDiag, botLeftDiag
+    );
+    var rippleSize = rippleRadius * 2;
+    var left = pointerX - rippleRadius;
+    var top = pointerY - rippleRadius;
+
+    style.height = rippleSize + 'px';
+    style.width = rippleSize + 'px';
+    style.top = top + 'px';
+    style.left = left + 'px';
+
+    return style;
+  },
+
+  _calcDiag: function(a, b) {
+    return Math.sqrt((a * a) + (b * b));
+  },
+
+  _getRippleElements: function() {
+    return this.state.ripples.map(function(ripple) {
+      return (
+        React.createElement(RippleCircle, {
+          key: ripple.key, 
+          started: ripple.started, 
+          ending: ripple.ending, 
+          style: ripple.style})
+      );
+    }.bind(this));
+  }
+
+});
+
+module.exports = TouchRipple;
+
+},{"../mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","../utils/dom":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\dom.js","./circle":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\ripples\\circle.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\slider.js":[function(require,module,exports){
+
+var React = require('react'),
+    Paper = require('./paper'),
+    Classable = require('./mixins/classable'),
+    Draggable = require('react-draggable2');
+
+var Slider = React.createClass({displayName: "Slider",
+
+  propTypes: {
+    required: React.PropTypes.bool,
+    disabled: React.PropTypes.bool,
+    min: React.PropTypes.number,
+    max: React.PropTypes.number,
+    step: React.PropTypes.number,
+    error: React.PropTypes.string,
+    description: React.PropTypes.string,
+    name: React.PropTypes.string.isRequired,
+    onChange: React.PropTypes.func,
+    onDragStart: React.PropTypes.func,
+    onDragStop: React.PropTypes.func
+  },
+
+  mixins: [Classable],
+
+  getDefaultProps: function() {
+    return {
+      required: true,
+      disabled: false,
+      defaultValue: 0,
+      min: 0,
+      max: 1,
+      dragging: false
+    };
+  },
+
+  getInitialState: function() {
+    var value = this.props.value;
+    if (value == null) value = this.props.defaultValue;
+    var percent = value / this.props.max;
+    if (isNaN(percent)) percent = 0;
+    return {
+      value: value,
+      percent: percent
+    }
+  },
+
+  componentWillReceiveProps: function(nextProps) {
+    if (nextProps.value != null) {
+      this.setValue(nextProps.value);
+    }
+  },
+
+  render: function() {
+    var classes = this.getClasses('mui-input', {
+      'mui-error': this.props.error != null
+    });
+
+    var sliderClasses = this.getClasses('mui-slider', {
+      'mui-slider-zero': this.state.percent == 0,
+      'mui-disabled': this.props.disabled
+    });
+
+    var percent = this.state.percent;
+    if (percent > 1) percent = 1; else if (percent < 0) percent = 0;
+
+    return (
+      React.createElement("div", {className: classes, style: this.props.style}, 
+        React.createElement("span", {className: "mui-input-highlight"}), 
+        React.createElement("span", {className: "mui-input-bar"}), 
+        React.createElement("span", {className: "mui-input-description"}, this.props.description), 
+        React.createElement("span", {className: "mui-input-error"}, this.props.error), 
+        React.createElement("div", {className: sliderClasses, onClick: this._onClick}, 
+          React.createElement("div", {ref: "track", className: "mui-slider-track"}, 
+            React.createElement(Draggable, {axis: "x", bound: "point", 
+              cancel: this.props.disabled ? '*' : null, 
+              start: {x: (percent * 100) + '%'}, 
+              onStart: this._onDragStart, 
+              onStop: this._onDragStop, 
+              onDrag: this._onDragUpdate}, 
+              React.createElement("div", {className: "mui-slider-handle", tabIndex: 0})
+            ), 
+            React.createElement("div", {className: "mui-slider-selection mui-slider-selection-low", 
+              style: {width: (percent * 100) + '%'}}, 
+              React.createElement("div", {className: "mui-slider-selection-fill"})
+            ), 
+            React.createElement("div", {className: "mui-slider-selection mui-slider-selection-high", 
+              style: {width: ((1 - percent) * 100) + '%'}}, 
+              React.createElement("div", {className: "mui-slider-selection-fill"})
+            )
+          )
+        ), 
+        React.createElement("input", {ref: "input", type: "hidden", 
+          name: this.props.name, 
+          value: this.state.value, 
+          required: this.props.required, 
+          min: this.props.min, 
+          max: this.props.max, 
+          step: this.props.step})
+      )
+    );
+  },
+
+  getValue: function() {
+    return this.state.value;
+  },
+
+  setValue: function(i) {
+    // calculate percentage
+    var percent = (i - this.props.min) / (this.props.max - this.props.min);
+    if (isNaN(percent)) percent = 0;
+    // update state
+    this.setState({
+      value: i,
+      percent: percent
+    });
+  },
+
+  getPercent: function() {
+    return this.state.percent;
+  },
+
+  setPercent: function (percent) {
+    var value = this._percentToValue(percent);
+    this.setState({value: value, percent: percent});
+  },
+
+  clearValue: function() {
+    this.setValue(0);
+  },
+
+  _onClick: function (e) {
+    // let draggable handle the slider
+    if (this.state.dragging || this.props.disabled) return;
+    var value = this.state.value;
+    var node = this.refs.track.getDOMNode();
+    var boundingClientRect = node.getBoundingClientRect();
+    var offset = e.clientX - boundingClientRect.left;
+    this._updateWithChangeEvent(e, offset / node.clientWidth);
+  },
+
+  _onDragStart: function(e, ui) {
+    this.setState({
+      dragging: true
+    });
+    if (this.props.onDragStart) this.props.onDragStart(e, ui);
+  },
+
+  _onDragStop: function(e, ui) {
+    this.setState({
+      dragging: false
+    });
+    if (this.props.onDragStop) this.props.onDragStop(e, ui);
+  },
+
+  _onDragUpdate: function(e, ui) {
+    if (!this.state.dragging) return;
+    if (!this.props.disabled) this._dragX(e, ui.position.left);
+  },
+
+  _dragX: function(e, pos) {
+    var max = this.refs.track.getDOMNode().clientWidth;
+    if (pos < 0) pos = 0; else if (pos > max) pos = max;
+    this._updateWithChangeEvent(e, pos / max);
+  },
+
+  _updateWithChangeEvent: function(e, percent) {
+    if (this.state.percent === percent) return;
+    this.setPercent(percent);
+    var value = this._percentToValue(percent);
+    if (this.props.onChange) this.props.onChange(e, value);
+  },
+
+  _percentToValue: function(percent) {
+    return percent * (this.props.max - this.props.min) + this.props.min;
+  }
+
+});
+
+module.exports = Slider;
+
+},{"./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./paper":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\paper.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react-draggable2":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\node_modules\\react-draggable2\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\snackbar.js":[function(require,module,exports){
+var React = require('react');
+var CssEvent = require('./utils/css-event');
+var Classable = require('./mixins/classable');
+var ClickAwayable = require('./mixins/click-awayable');
+var FlatButton = require('./flat-button');
+
+var Snackbar = React.createClass({displayName: "Snackbar",
+
+  mixins: [Classable, ClickAwayable],
+
+  manuallyBindClickAway: true,
+
+  propTypes: {
+    action: React.PropTypes.string,
+    message: React.PropTypes.string.isRequired,
+    openOnMount: React.PropTypes.bool,
+    onActionTouchTap: React.PropTypes.func
+  },
+
+  getInitialState: function() {
+    return {
+      open: this.props.openOnMount || false
+    };
+  },
+
+  componentClickAway: function() {
+    this.dismiss();
+  },
+
+  componentDidUpdate: function(prevProps, prevState) {
+    if (prevState.open != this.state.open) {
+      if (this.state.open) {
+        //Only Bind clickaway after transition finishes
+        CssEvent.onTransitionEnd(this.getDOMNode(), function() {
+          this._bindClickAway();
+        }.bind(this));
+      } else {
+        this._unbindClickAway();
+      }
+    }
+  },
+
+  render: function() {
+    var classes = this.getClasses('mui-snackbar', {
+      'mui-is-open': this.state.open
+    }); 
+    var action;
+
+    if (this.props.action) {
+      action = (
+        React.createElement(FlatButton, {
+          className: "mui-snackbar-action", 
+          label: this.props.action, 
+          onTouchTap: this.props.onActionTouchTap})
+      );
+    }
+
+    return (
+      React.createElement("span", {className: classes}, 
+        React.createElement("span", {className: "mui-snackbar-message"}, this.props.message), 
+        action
+      )
+    );
+  },
+
+  show: function() {
+    this.setState({ open: true });
+  },
+  
+  dismiss: function() {
+    this.setState({ open: false });
+  }
+
+});
+
+module.exports = Snackbar;
+},{"./flat-button":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\flat-button.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./mixins/click-awayable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\click-awayable.js","./utils/css-event":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\css-event.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\drop-down-arrow.js":[function(require,module,exports){
+var React = require('react');
+var SvgIcon = require('./svg-icon');
+
+var DropDownArrow = React.createClass({displayName: "DropDownArrow",
+
+  render: function() {
+    return (
+      React.createElement(SvgIcon, React.__spread({},  this.props), 
+        React.createElement("polygon", {points: "7,9.5 12,14.5 17,9.5 "})
+      )
+    );
+  }
+
+});
+
+module.exports = DropDownArrow;
+},{"./svg-icon":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\svg-icon.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\navigation-chevron-left.js":[function(require,module,exports){
+var React = require('react');
+var SvgIcon = require('./svg-icon');
+
+var NavigationChevronLeft = React.createClass({displayName: "NavigationChevronLeft",
+
+  render: function() {
+    return (
+      React.createElement(SvgIcon, React.__spread({},  this.props), 
+        React.createElement("path", {d: "M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"})
+      )
+    );
+  }
+
+});
+
+module.exports = NavigationChevronLeft;
+},{"./svg-icon":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\svg-icon.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\navigation-chevron-right.js":[function(require,module,exports){
+var React = require('react');
+var SvgIcon = require('./svg-icon');
+
+var NavigationChevronLeft = React.createClass({displayName: "NavigationChevronLeft",
+
+  render: function() {
+    return (
+      React.createElement(SvgIcon, React.__spread({},  this.props), 
+        React.createElement("path", {d: "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"})
+      )
+    );
+  }
+
+});
+
+module.exports = NavigationChevronLeft;
+
+
+},{"./svg-icon":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\svg-icon.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\navigation-menu.js":[function(require,module,exports){
+var React = require('react');
+var SvgIcon = require('./svg-icon');
+
+var NavigationMenu = React.createClass({displayName: "NavigationMenu",
+
+  render: function() {
+    return (
+      React.createElement(SvgIcon, React.__spread({},  this.props), 
+        React.createElement("path", {d: "M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"})
+      )
+    );
+  }
+
+});
+
+module.exports = NavigationMenu;
+},{"./svg-icon":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\svg-icon.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\svg-icon.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('../mixins/classable');
+
+var SvgIcon = React.createClass({displayName: "SvgIcon",
+
+  mixins: [Classable],
+
+  render: function() {
+    var classes = this.getClasses('mui-svg-icon');
+
+    return (
+      React.createElement("svg", React.__spread({}, 
+        this.props, 
+        {className: classes, 
+        viewBox: "0 0 24 24"}), 
+        this.props.children
+      )
+    );
+  }
+
+});
+
+module.exports = SvgIcon;
+},{"../mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\toggle-check-box-checked.js":[function(require,module,exports){
+var React = require('react');
+var SvgIcon = require('./svg-icon');
+
+var ToggleCheckBoxChecked = React.createClass({displayName: "ToggleCheckBoxChecked",
+
+  render: function() {
+    return (
+      React.createElement(SvgIcon, React.__spread({},  this.props), 
+        React.createElement("path", {d: "M19,3H5C3.9,3,3,3.9,3,5v14c0,1.1,0.9,2,2,2h14c1.1,0,2-0.9,2-2V5C21,3.9,20.1,3,19,3z M10,17l-5-5l1.4-1.4 l3.6,3.6l7.6-7.6L19,8L10,17z"})
+      )
+    );
+  }
+
+});
+
+module.exports = ToggleCheckBoxChecked;
+},{"./svg-icon":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\svg-icon.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\toggle-check-box-outline-blank.js":[function(require,module,exports){
+var React = require('react');
+var SvgIcon = require('./svg-icon');
+
+var ToggleCheckBoxOutlineBlank = React.createClass({displayName: "ToggleCheckBoxOutlineBlank",
+
+  render: function() {
+    return (
+      React.createElement(SvgIcon, React.__spread({},  this.props), 
+        React.createElement("path", {d: "M19,5v14H5V5H19 M19,3H5C3.9,3,3,3.9,3,5v14c0,1.1,0.9,2,2,2h14c1.1,0,2-0.9,2-2V5C21,3.9,20.1,3,19,3z"})
+      )
+    );
+  }
+
+});
+
+module.exports = ToggleCheckBoxOutlineBlank;
+},{"./svg-icon":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\svg-icon.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\toggle-radio-button-off.js":[function(require,module,exports){
+var React = require('react');
+var SvgIcon = require('./svg-icon');
+
+var RadioButtonOff = React.createClass({displayName: "RadioButtonOff",
+
+  render: function() {
+    return (
+      React.createElement(SvgIcon, React.__spread({},  this.props), 
+        React.createElement("path", {d: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"})
+      )
+    );
+  }
+
+});
+
+module.exports = RadioButtonOff;
+},{"./svg-icon":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\svg-icon.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\toggle-radio-button-on.js":[function(require,module,exports){
+var React = require('react');
+var SvgIcon = require('./svg-icon');
+
+var RadioButtonOn = React.createClass({displayName: "RadioButtonOn",
+
+  render: function() {
+    return (
+      React.createElement(SvgIcon, React.__spread({},  this.props), 
+       React.createElement("path", {d: "M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm0-5C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"})
+      )
+    );
+  }
+
+});
+
+module.exports = RadioButtonOn;
+},{"./svg-icon":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\svg-icons\\svg-icon.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\tabs\\tab.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('../mixins/classable');
+var TabTemplate = require('./tabTemplate');
+
+
+var Tab = React.createClass({displayName: "Tab",
+
+  mixins: [Classable],
+
+  propTypes: {
+    handleTouchTap: React.PropTypes.func,
+    selected: React.PropTypes.bool
+  },
+
+
+  handleTouchTap: function(){
+    this.props.handleTouchTap(this.props.tabIndex, this);
+  },
+
+  render: function(){
+    var styles = {
+      width: this.props.width
+    };
+
+    var classes = this.getClasses('mui-tab-item', {
+      'mui-tab-is-active': this.props.selected
+    });
+
+    return (
+    React.createElement("div", {className: classes, style: styles, onTouchTap: this.handleTouchTap, routeName: this.props.route}, 
+      this.props.label
+    )
+    )
+  }
+
+});
+
+module.exports = Tab;
+},{"../mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./tabTemplate":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\tabs\\tabTemplate.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\tabs\\tabTemplate.js":[function(require,module,exports){
+var React = require('react');
+
+var TabTemplate = React.createClass({displayName: "TabTemplate",
+
+  render: function(){
+
+    return (
+      React.createElement("div", {className: "mui-tab-template"}, 
+        this.props.children
+      )
+    );
+  },
+});
+
+module.exports = TabTemplate;
+},{"react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\tabs\\tabs.js":[function(require,module,exports){
+var React = require('react/addons');
+var Tab = require('./tab');
+var TabTemplate = require('./tabTemplate');
+var InkBar = require('../ink-bar');
+
+var Tabs = React.createClass({displayName: "Tabs",
+
+  propTypes: {
+    onActive: React.PropTypes.func
+  },
+
+  getInitialState: function(){
+    return {
+      selectedIndex: 0
+    };
+  },
+
+  getEvenWidth: function(){
+    return (
+      parseInt(window
+        .getComputedStyle(this.getDOMNode())
+        .getPropertyValue('width'), 10)
+    );
+  },
+
+  componentDidMount: function(){
+    if(this.props.tabWidth) {
+      if(!(this.props.children.length * this.props.tabWidth > this.getEvenWidth())){
+        this.setState({
+          width: this.props.tabWidth,
+          fixed: false
+        });
+        return;
+      }
+    }
+    this.setState({
+      width: this.getEvenWidth(),
+      fixed: true
+    });
+  },
+
+  handleTouchTap: function(tabIndex, tab){
+    if (this.props.onChange && this.state.selectedIndex !== tabIndex) this.props.onChange();
+    this.setState({selectedIndex: tabIndex});
+    //default CB is _onActive. Can be updated in tab.jsx
+    if(tab.props.onActive) tab.props.onActive(tab);
+  },
+
+  render: function(){
+    var _this = this; 
+    var width = this.state.fixed ?
+      this.state.width/this.props.children.length :
+      this.props.tabWidth;
+    var left = width * this.state.selectedIndex || 0;
+    var currentTemplate;
+    var tabs = React.Children.map(this.props.children, function(tab, index){
+      if(tab.type.displayName === "Tab"){
+        if(_this.state.selectedIndex === index) currentTemplate = tab.props.children;
+         return React.addons.cloneWithProps(tab, {
+            key: index,
+            selected: _this.state.selectedIndex === index,
+            tabIndex: index,
+            width: width,
+            handleTouchTap: _this.handleTouchTap
+          })
+      } else {
+        var type = tab.type.displayName || tab.type;
+        throw "Tabs only accepts Tab Components as children. Found " + type + " as child number " + (index + 1) + " of Tabs";
+      }
+    });
+
+    return (
+      React.createElement("div", {className: "mui-tabs-container"}, 
+        React.createElement("div", {className: "mui-tab-item-container"}, 
+          tabs
+        ), 
+        React.createElement(InkBar, {left: left, width: width}), 
+        React.createElement(TabTemplate, null, 
+          currentTemplate
+        )
+      )
+    )
+  },
+
+});
+
+module.exports = Tabs;
+},{"../ink-bar":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\ink-bar.js","./tab":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\tabs\\tab.js","./tabTemplate":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\tabs\\tabTemplate.js","react/addons":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\addons.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\text-field.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('./mixins/classable');
+var DomIdable = require('./mixins/dom-idable');
+var EnhancedTextarea = require('./enhanced-textarea');
+
+var TextField = React.createClass({displayName: "TextField",
+
+  mixins: [Classable, DomIdable],
+
+  propTypes: {
+    errorText: React.PropTypes.string,
+    floatingLabelText: React.PropTypes.string,
+    hintText: React.PropTypes.string,
+    id: React.PropTypes.string,
+    multiLine: React.PropTypes.bool,
+    onBlur: React.PropTypes.func,
+    onChange: React.PropTypes.func,
+    onFocus: React.PropTypes.func,
+    type: React.PropTypes.string
+  },
+
+  getDefaultProps: function() {
+    return {
+      type: 'text'
+    };
+  },
+
+  getInitialState: function() {
+    return {
+      errorText: this.props.errorText,
+      hasValue: this.props.value || this.props.defaultValue ||
+        (this.props.valueLink && this.props.valueLink.value)
+    };
+  },
+
+  componentWillReceiveProps: function(nextProps) {
+    var hasErrorProp = nextProps.hasOwnProperty('errorText');
+    var hasValueLinkProp = nextProps.hasOwnProperty('valueLink');
+    var hasValueProp = nextProps.hasOwnProperty('value');
+    var hasNewDefaultValue = nextProps.defaultValue !== this.props.defaultValue;
+    var newState = {};
+
+    if (hasValueProp) {
+      newState.hasValue = nextProps.value;
+    } else if (hasValueLinkProp) {
+      newState.hasValue = nextProps.valueLink.value;
+    } else if (hasNewDefaultValue) {
+      newState.hasValue = nextProps.defaultValue;
+    }
+
+    if (hasErrorProp) newState.errorText = nextProps.errorText;
+    if (newState) this.setState(newState);
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      this.props,className=$__0.className,errorText=$__0.errorText,floatingLabelText=$__0.floatingLabelText,hintText=$__0.hintText,id=$__0.id,multiLine=$__0.multiLine,onBlur=$__0.onBlur,onChange=$__0.onChange,onFocus=$__0.onFocus,type=$__0.type,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,errorText:1,floatingLabelText:1,hintText:1,id:1,multiLine:1,onBlur:1,onChange:1,onFocus:1,type:1});
+
+    var classes = this.getClasses('mui-text-field', {
+      'mui-has-error': this.props.errorText,
+      'mui-has-floating-labels': this.props.floatingLabelText,
+      'mui-has-value': this.state.hasValue,
+      'mui-is-disabled': this.props.disabled,
+      'mui-is-focused': this.state.isFocused,
+      'mui-is-multiLine': this.props.multiLine
+    });
+
+    var inputId = this.props.id || this.getDomId();
+
+    var errorTextElement = this.state.errorText ? (
+      React.createElement("div", {className: "mui-text-field-error"}, this.state.errorText)
+    ) : null;
+
+    var hintTextElement = this.props.hintText ? (
+      React.createElement("div", {className: "mui-text-field-hint"}, this.props.hintText)
+    ) : null;
+
+    var floatingLabelTextElement = this.props.floatingLabelText ? (
+      React.createElement("label", {
+        className: "mui-text-field-floating-label", 
+        htmlFor: inputId}, 
+        this.props.floatingLabelText
+      )
+    ) : null;
+
+    var inputProps;
+    var inputElement;
+
+    inputProps = {
+      ref: 'input',
+      className: 'mui-text-field-input',
+      id: inputId,
+      onBlur: this._handleInputBlur,
+      onFocus: this._handleInputFocus
+    };
+
+    if (!this.props.hasOwnProperty('valueLink')) {
+      inputProps.onChange = this._handleInputChange;
+    }
+
+    inputElement = this.props.multiLine ? (
+      React.createElement(EnhancedTextarea, React.__spread({}, 
+        other, 
+        inputProps, 
+        {onHeightChange: this._handleTextAreaHeightChange, 
+        textareaClassName: "mui-text-field-textarea"}))
+    ) : (
+      React.createElement("input", React.__spread({}, 
+        other, 
+        inputProps, 
+        {type: this.props.type}))
+    );
+
+    return (
+      React.createElement("div", {className: classes}, 
+
+        floatingLabelTextElement, 
+        hintTextElement, 
+        inputElement, 
+
+        React.createElement("hr", {className: "mui-text-field-underline"}), 
+        React.createElement("hr", {className: "mui-text-field-focus-underline"}), 
+
+        errorTextElement
+
+      )
+    );
+  },
+
+  blur: function() {
+    if (this.isMounted()) this._getInputNode().blur();
+  },
+
+  clearValue: function() {
+    this.setValue('');
+  },
+
+  focus: function() {
+    if (this.isMounted()) this._getInputNode().focus();
+  },
+
+  getValue: function() {
+    return this.isMounted() ? this._getInputNode().value : undefined;
+  },
+
+  setErrorText: function(newErrorText) {
+    if (this.props.hasOwnProperty('errorText')) {
+      console.error('Cannot call TextField.setErrorText when errorText is defined as a property.');
+    } else if (this.isMounted()) {
+      this.setState({errorText: newErrorText});
+    }
+  },
+
+  setValue: function(newValue) {
+    if (this._isControlled()) {
+      console.error('Cannot call TextField.setValue when value or valueLink is defined as a property.');
+    } else if (this.isMounted()) {
+      this._getInputNode().value = newValue;
+      this.setState({hasValue: newValue});
+    }
+  },
+
+  _getInputNode: function() {
+    return this.props.multiLine ? 
+      this.refs.input.getInputNode() : this.refs.input.getDOMNode();
+  },
+
+  _handleInputBlur: function(e) {
+    this.setState({isFocused: false});
+    if (this.props.onBlur) this.props.onBlur(e);
+  },
+
+  _handleInputChange: function(e) {
+    this.setState({hasValue: e.target.value});
+    if (this.props.onChange) this.props.onChange(e);
+  },
+
+  _handleInputFocus: function(e) {
+    this.setState({isFocused: true});
+    if (this.props.onFocus) this.props.onFocus(e);
+  },
+
+  _handleTextAreaHeightChange: function(e, height) {
+    var newHeight = height + 24;
+    if (this.props.floatingLabelText) newHeight += 24;
+    this.getDOMNode().style.height = newHeight + 'px';
+  },
+
+  _isControlled: function() {
+    return this.props.hasOwnProperty('value') ||
+      this.props.hasOwnProperty('valueLink');
+  }
+
+});
+
+module.exports = TextField;
+},{"./enhanced-textarea":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\enhanced-textarea.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./mixins/dom-idable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\dom-idable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\toggle.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('./mixins/classable');
+var Paper = require('./paper');
+var EnhancedSwitch = require('./enhanced-switch');
+
+var Toggle = React.createClass({displayName: "Toggle",
+
+  mixins: [Classable],
+
+  propTypes: {
+    onToggle: React.PropTypes.func,
+    toggled: React.PropTypes.bool,
+    defaultToggled: React.PropTypes.bool
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+      this.props,onToggle=$__0.onToggle,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{onToggle:1});
+
+    var toggleElement = (
+      React.createElement("div", null, 
+        React.createElement("div", {className: "mui-toggle-track"}), 
+        React.createElement(Paper, {className: "mui-toggle-thumb", zDepth: 1})
+      )
+    );
+
+    var enhancedSwitchProps = {
+      ref: "enhancedSwitch",
+      inputType: "checkbox",
+      switchElement: toggleElement,
+      className: "mui-toggle",
+      iconClassName: "mui-toggle-icon",
+      onSwitch: this._handleToggle,
+      defaultSwitched: this.props.defaultToggled,
+      labelPosition: (this.props.labelPosition) ? this.props.labelPosition : "left"
+    };
+
+    if (this.props.hasOwnProperty('toggled')) enhancedSwitchProps.checked = this.props.toggled;
+
+    return (
+      React.createElement(EnhancedSwitch, React.__spread({},  
+        other, 
+        enhancedSwitchProps))
+    );
+  },
+
+  isToggled: function() {
+    return this.refs.enhancedSwitch.isSwitched();
+  },
+
+  setToggled: function(newToggledValue) {
+    this.refs.enhancedSwitch.setSwitched(newToggledValue);
+  },
+
+  _handleToggle: function(e, isInputChecked) {
+    if (this.props.onToggle) this.props.onToggle(e, isInputChecked);
+  }
+});
+
+module.exports = Toggle;
+
+},{"./enhanced-switch":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\enhanced-switch.js","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","./paper":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\paper.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\toolbar-group.js":[function(require,module,exports){
+/** @jsx React.DOM */
+
+var Classable = require('./mixins/classable');
+var React = require('react');
+
+var ToolbarGroup = React.createClass({displayName: "ToolbarGroup",
+
+  propTypes: {
+    float: React.PropTypes.string
+  },
+
+  mixins: [Classable],
+
+  render: function() {
+
+    var classes = this.getClasses('mui-toolbar-group', {
+      'mui-left': this.props.float === 'left',
+      'mui-right': this.props.float === 'right'
+    });
+
+    return (
+      React.createElement("div", {className: classes}, 
+        this.props.children
+      )
+    );
+  }
+
+});
+
+module.exports = ToolbarGroup;
+
+},{"./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\toolbar.js":[function(require,module,exports){
+/** @jsx React.DOM */
+
+var Classable = require('./mixins/classable');
+var React = require('react');
+
+var Toolbar = React.createClass({displayName: "Toolbar",
+
+  mixins: [Classable],
+
+  render: function() {
+    var classes = this.getClasses('mui-toolbar', {
+    });
+
+    return (
+      React.createElement("div", {className: classes}, 
+        this.props.children
+      )
+    );
+  }
+
+});
+
+module.exports = Toolbar;
+
+},{"./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\tooltip.js":[function(require,module,exports){
+var React = require('react');
+var Classable = require('./mixins/classable');
+
+var Tooltip = React.createClass({displayName: "Tooltip",
+
+  mixins: [Classable],
+
+  propTypes: {
+    className: React.PropTypes.string,
+    label: React.PropTypes.string.isRequired,
+    show: React.PropTypes.bool,
+    touch: React.PropTypes.bool
+  },
+
+  componentDidMount: function() {
+    this._setRippleSize();
+  },
+
+  componentDidUpdate: function(prevProps, prevState) {
+    this._setRippleSize();
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+         this.props,className=$__0.className,label=$__0.label,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,label:1});
+    var classes = this.getClasses('mui-tooltip', {
+      'mui-is-shown': this.props.show,
+      'mui-is-touch': this.props.touch
+    });
+
+    return (
+      React.createElement("div", React.__spread({},  other, {className: classes}), 
+        React.createElement("div", {ref: "ripple", className: "mui-tooltip-ripple"}), 
+        React.createElement("span", {className: "mui-tooltip-label"}, this.props.label)
+      )
+    );
+  },
+
+  _setRippleSize: function() {
+    var ripple = this.refs.ripple.getDOMNode();
+    var tooltipSize = this.getDOMNode().offsetWidth;
+    var ripplePadding = this.props.touch ? 45 : 20;
+    var rippleSize = tooltipSize + ripplePadding + 'px';
+
+    if (this.props.show) {
+      ripple.style.height = rippleSize;
+      ripple.style.width = rippleSize;
+    } else {
+      ripple.style.width = '0px';
+      ripple.style.height = '0px';
+    }
+  }
+
+});
+
+module.exports = Tooltip;
+},{"./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\transition-groups\\slide-in.js":[function(require,module,exports){
+var React = require('react/addons');
+var ReactCSSTransitionGroup = React.addons.CSSTransitionGroup;
+var Classable = require('../mixins/classable');
+
+var SlideIn = React.createClass({displayName: "SlideIn",
+
+  mixins: [Classable],
+
+  propTypes: {
+    direction: React.PropTypes.oneOf(['left', 'right', 'up', 'down'])
+  },
+
+  getDefaultProps: function() {
+    return {
+      direction: 'left'
+    };
+  },
+
+  render: function() {
+    var $__0=
+      
+      
+      
+      this.props,className=$__0.className,direction=$__0.direction,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,direction:1});
+    var classes = this.getClasses('mui-transition-slide-in');
+
+    classes += ' mui-is-' + this.props.direction;
+
+    //Add a custom className to every child
+    React.Children.forEach(this.props.children, function(child) {
+      child.props.className = child.props.className ?
+        child.props.className + ' mui-transition-slide-in-child':
+        'mui-transition-slide-in-child';
+    });
+
+    return (
+      React.createElement(ReactCSSTransitionGroup, React.__spread({},  other, 
+        {className: classes, 
+        transitionName: "mui-transition-slide-in", 
+        component: "div"}), 
+        this.props.children
+      )
+    );
+  }
+
+});
+
+module.exports = SlideIn;
+},{"../mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\mixins\\classable.js","react/addons":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\addons.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\css-event.js":[function(require,module,exports){
+var Events = require('./events');
+
+module.exports = {
+
+  _testSupportedProps: function(props) {
+    var i,
+      undefined,
+      el = document.createElement('div');
+
+    for (i in props) {
+      if (props.hasOwnProperty(i) && el.style[i] !== undefined) {
+        return props[i];
+      }
+    }
+  },
+
+  //Returns the correct event name to use
+  transitionEndEventName: function() {
+    return this._testSupportedProps({
+      'transition':'transitionend',
+      'OTransition':'otransitionend',  
+      'MozTransition':'transitionend',
+      'WebkitTransition':'webkitTransitionEnd'
+    });
+  },
+
+  animationEndEventName: function() {
+    return this._testSupportedProps({
+      'animation': 'animationend',
+      '-o-animation': 'oAnimationEnd',
+      '-moz-animation': 'animationend',
+      '-webkit-animation': 'webkitAnimationEnd'
+    });
+  },
+
+  onTransitionEnd: function (el, callback) {
+    var transitionEnd = this.transitionEndEventName();
+
+    Events.once(el, transitionEnd, function() {
+      return callback();
+    });
+  },
+
+  onAnimationEnd: function (el, callback) {
+    var animationEnd = this.animationEndEventName();
+
+    Events.once(el, animationEnd, function() {
+      return callback();
+    });
+  }
+
+};
+},{"./events":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\events.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\date-time.js":[function(require,module,exports){
+module.exports = {
+
+  addDays: function(d, days) {
+    var newDate = this.clone(d);
+    newDate.setDate(d.getDate() + days);
+    return newDate;
+  },
+
+  addMonths: function(d, months) {
+    var newDate = this.clone(d);
+    newDate.setMonth(d.getMonth() + months);
+    return newDate;
+  },
+
+  clone: function(d) {
+    return new Date(d.getTime());
+  },
+
+  getDaysInMonth: function(d) {
+    var resultDate = this.getFirstDayOfMonth(d);
+
+    resultDate.setMonth(resultDate.getMonth() + 1);
+    resultDate.setDate(resultDate.getDate() - 1);
+
+    return resultDate.getDate();
+  },
+
+  getFirstDayOfMonth: function(d) {
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  },
+
+  getFullMonth: function(d) {
+    var month = d.getMonth();
+    switch (month) {
+      case 0: return 'January';
+      case 1: return 'February';
+      case 2: return 'March';
+      case 3: return 'April';
+      case 4: return 'May';
+      case 5: return 'June';
+      case 6: return 'July';
+      case 7: return 'August';
+      case 8: return 'September';
+      case 9: return 'October';
+      case 10: return 'November';
+      case 11: return 'December';
+    }
+  },
+
+  getShortMonth: function(d) {
+    var month = d.getMonth();
+    switch (month) {
+      case 0: return 'Jan';
+      case 1: return 'Feb';
+      case 2: return 'Mar';
+      case 3: return 'Apr';
+      case 4: return 'May';
+      case 5: return 'Jun';
+      case 6: return 'Jul';
+      case 7: return 'Aug';
+      case 8: return 'Sep';
+      case 9: return 'Oct';
+      case 10: return 'Nov';
+      case 11: return 'Dec';
+    }
+  },
+
+  getDayOfWeek: function(d) {
+    var dow = d.getDay();
+    switch (dow) {
+      case 0: return 'Sunday';
+      case 1: return 'Monday';
+      case 2: return 'Tuesday';
+      case 3: return 'Wednesday';
+      case 4: return 'Thursday';
+      case 5: return 'Friday';
+      case 6: return 'Saturday';
+    }
+  },
+
+  getWeekArray: function(d) {
+    var dayArray = [];
+    var daysInMonth = this.getDaysInMonth(d);
+    var daysInWeek;
+    var emptyDays;
+    var firstDayOfWeek;
+    var week;
+    var weekArray = [];
+
+    for (var i = 1; i <= daysInMonth; i++) {
+      dayArray.push(new Date(d.getFullYear(), d.getMonth(), i));
+    };
+
+    while (dayArray.length) {
+      firstDayOfWeek = dayArray[0].getDay();
+      daysInWeek = 7 - firstDayOfWeek;
+      emptyDays = 7 - daysInWeek;
+      week = dayArray.splice(0, daysInWeek);
+
+      for (var i = 0; i < emptyDays; i++) {
+        week.unshift(null);
+      };
+
+      weekArray.push(week);
+    }
+
+    return weekArray;
+  },
+
+  format: function(date) {
+    var m = date.getMonth() + 1;
+    var d = date.getDate();
+    var y = date.getFullYear();
+    return m + '/' + d + '/' + y;
+  },
+
+  isEqualDate: function(d1, d2) {
+    return d1 && d2 &&
+      (d1.getFullYear() === d2.getFullYear()) &&
+      (d1.getMonth() === d2.getMonth()) &&
+      (d1.getDate() === d2.getDate());
+  },
+
+  monthDiff: function(d1, d2) {
+    var m;
+    m = (d1.getFullYear() - d2.getFullYear()) * 12;
+    m += d1.getMonth();
+    m -= d2.getMonth();
+    return m;
+  }
+
+}
+},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\dom.js":[function(require,module,exports){
+module.exports = {
+
+  isDescendant: function(parent, child) {
+    var node = child.parentNode;
+
+    while (node != null) {
+      if (node == parent) return true;
+      node = node.parentNode;
+    }
+
+    return false;
+  },
+
+  offset: function(el) {
+    var rect = el.getBoundingClientRect()
+    return {
+      top: rect.top + document.body.scrollTop,
+      left: rect.left + document.body.scrollLeft
+    };
+  },
+
+  addClass: function(el, className) {
+    if (el.classList)
+      el.classList.add(className);
+    else
+      el.className += ' ' + className;
+  },
+
+  removeClass: function(el, className) {
+    if (el.classList)
+      el.classList.remove(className);
+    else
+      el.className = el.className.replace(new RegExp('(^|\\b)' + className.split(' ').join('|') + '(\\b|$)', 'gi'), ' ');
+  },
+
+  hasClass: function(el, className) {
+    if (el.classList)
+      return el.classList.contains(className);
+    else
+      return new RegExp('(^| )' + className + '( |$)', 'gi').test(el.className);
+  },
+
+  toggleClass: function(el, className) {
+    if (this.hasClass(el, className))
+      this.removeClass(el, className);
+    else
+      this.addClass(el, className);
+  },
+
+  forceRedraw: function(el) {
+    var originalDisplay = el.style.display;
+
+    el.style.display = 'none';
+    el.offsetHeight;
+    el.style.display = originalDisplay;
+  },
+
+  withoutTransition: function(el, callback) {
+    //turn off transition
+    el.style.transition = 'none';
+    
+    callback();
+
+    //force a redraw
+    this.forceRedraw(el);
+
+    //put the transition back
+    el.style.transition = '';
+  }
+  
+}
+},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\events.js":[function(require,module,exports){
+module.exports = {
+
+  once: function(el, type, callback) {
+    var typeArray = type.split(' ');
+    var recursiveFunction = function(e){
+      e.target.removeEventListener(e.type, recursiveFunction);
+      return callback(e);
+    };
+
+    for (var i = typeArray.length - 1; i >= 0; i--) {
+      this.on(el, typeArray[i], recursiveFunction);
+    }
+  },
+
+  // IE8+ Support
+  on: function(el, type, callback) {
+    if(el.addEventListener) {
+      el.addEventListener(type, callback);
+    } else {
+      el.attachEvent('on' + type, function() {
+        callback.call(el);
+      });
+    }
+  },
+
+  // IE8+ Support
+  off: function(el, type, callback) {
+    if(el.removeEventListener) {
+      el.removeEventListener(type, callback);
+    } else {
+      el.detachEvent('on' + type, callback);
+    }
+  }
+};
+},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\key-code.js":[function(require,module,exports){
+module.exports = {
+  DOWN: 40,
+  ESC: 27,
+  ENTER: 13,
+  LEFT: 37,
+  RIGHT: 39,
+  SPACE: 32,
+  TAB: 9,
+  UP: 38
+}
+},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\lib\\js\\utils\\key-line.js":[function(require,module,exports){
+module.exports = {
+
+  Desktop: {
+    GUTTER: 24,
+    GUTTER_LESS: 16,
+    INCREMENT: 64,
+    MENU_ITEM_HEIGHT: 32
+  },
+
+  getIncrementalDim: function(dim) {
+    return Math.ceil(dim / this.Desktop.INCREMENT) * this.Desktop.INCREMENT;
+  }
+}
+
+},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\node_modules\\react-classset\\classSet.js":[function(require,module,exports){
+/**
+ * Copyright 2013 Facebook, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+function cx(classNames) {
+  var names = '';
+
+  if (typeof classNames == 'object') {
+    for (var name in classNames) {
+      if (!classNames.hasOwnProperty(name) || !classNames[name]) {
+        continue;
+      }
+      names += name + ' ';
+    }
+  } else {
+    for (var i = 0; i < arguments.length; i++) {
+      // We should technically exclude 0 too, but for the sake of backward
+      // compat we'll keep it (for now)
+      if (arguments[i] == null) {
+        continue;
+      }
+      names += arguments[i] + ' ';
+    }
+  }
+
+  return names.trim();
+}
+
+module.exports = cx;
+
 },{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\node_modules\\react-draggable2\\index.js":[function(require,module,exports){
 module.exports = require('./lib/draggable');
 
@@ -4298,4011 +16978,87 @@ module.exports = React.createClass({
 
 });
 
-},{"react/addons":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\addons.js","react/lib/emptyFunction":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\emptyFunction.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\index.js":[function(require,module,exports){
-module.exports = {
-  AppBar: require('./js/app-bar.jsx'),
-  AppCanvas: require('./js/app-canvas.jsx'),
-  Checkbox: require('./js/checkbox.jsx'),
-  DatePicker: require('./js/date-picker/date-picker.jsx'),
-  Dialog: require('./js/dialog.jsx'),
-  DropDownIcon: require('./js/drop-down-icon.jsx'),
-  DropDownMenu: require('./js/drop-down-menu.jsx'),
-  EnhancedButton: require('./js/enhanced-button.jsx'),
-  FlatButton: require('./js/flat-button.jsx'),
-  FloatingActionButton: require('./js/floating-action-button.jsx'),
-  IconButton: require('./js/icon-button.jsx'),
-  Icon: require('./js/icon.jsx'),
-  Input: require('./js/input.jsx'),
-  LeftNav: require('./js/left-nav.jsx'),
-  MenuItem: require('./js/menu-item.jsx'),
-  Menu: require('./js/menu.jsx'),
-  Mixins: {
-    Classable: require('./js/mixins/classable.js'),
-    ClickAwayable: require('./js/mixins/click-awayable.js'),
-    WindowListenable: require('./js/mixins/window-listenable.js'),
-  },
-  Paper: require('./js/paper.jsx'),
-  RadioButton: require('./js/radio-button.jsx'),
-  RaisedButton: require('./js/raised-button.jsx'),
-  Ripple: require('./js/ripple.jsx'),
-  Slider: require('./js/slider.jsx'),
-  Toggle: require('./js/toggle.jsx'),
-  Toast: require('./js/toast.jsx'),
-  Toolbar: require('./js/toolbar.jsx'),
-  ToolbarGroup: require('./js/toolbar-group.jsx'),
-  Tooltip: require('./js/tooltip.jsx'),
-  Utils: {
-    CssEvent: require('./js/utils/css-event.js'),
-    Dom: require('./js/utils/dom.js'),
-    Events: require('./js/utils/events.js'),
-    KeyCode: require('./js/utils/key-code.js'),
-    KeyLine: require('./js/utils/key-line.js')
-  }
-};
-
-},{"./js/app-bar.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\app-bar.jsx","./js/app-canvas.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\app-canvas.jsx","./js/checkbox.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\checkbox.jsx","./js/date-picker/date-picker.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\date-picker\\date-picker.jsx","./js/dialog.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\dialog.jsx","./js/drop-down-icon.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\drop-down-icon.jsx","./js/drop-down-menu.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\drop-down-menu.jsx","./js/enhanced-button.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\enhanced-button.jsx","./js/flat-button.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\flat-button.jsx","./js/floating-action-button.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\floating-action-button.jsx","./js/icon-button.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\icon-button.jsx","./js/icon.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\icon.jsx","./js/input.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\input.jsx","./js/left-nav.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\left-nav.jsx","./js/menu-item.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\menu-item.jsx","./js/menu.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\menu.jsx","./js/mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./js/mixins/click-awayable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\click-awayable.js","./js/mixins/window-listenable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\window-listenable.js","./js/paper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\paper.jsx","./js/radio-button.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\radio-button.jsx","./js/raised-button.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\raised-button.jsx","./js/ripple.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\ripple.jsx","./js/slider.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\slider.jsx","./js/toast.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\toast.jsx","./js/toggle.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\toggle.jsx","./js/toolbar-group.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\toolbar-group.jsx","./js/toolbar.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\toolbar.jsx","./js/tooltip.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\tooltip.jsx","./js/utils/css-event.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\css-event.js","./js/utils/dom.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\dom.js","./js/utils/events.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\events.js","./js/utils/key-code.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\key-code.js","./js/utils/key-line.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\key-line.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\app-bar.jsx":[function(require,module,exports){
-var React = require('react'),
-  Classable = require('./mixins/classable.js'),
-  IconButton = require('./icon-button.jsx'),
-  Paper = require('./paper.jsx');
-
-var AppBar = React.createClass({displayName: "AppBar",
-
-  mixins: [Classable],
-
-  propTypes: {
-    onMenuIconButtonTouchTap: React.PropTypes.func,
-    showMenuIconButton: React.PropTypes.bool,
-    title : React.PropTypes.string,
-    zDepth: React.PropTypes.number
-  },
-
-  getDefaultProps: function() {
-    return {
-      showMenuIconButton: true,
-      title: '',
-      zDepth: 1
-    }
-  },
-
-  render: function() {
-    var classes = this.getClasses('mui-app-bar'),
-      title, menuIconButton;
-
-    if (this.props.title) {
-      title = React.createElement("h1", {className: "mui-app-bar-title"}, this.props.title);
-    }
-
-    if (this.props.showMenuIconButton) {
-      menuIconButton = (
-        React.createElement(IconButton, {
-          className: "mui-app-bar-navigation-icon-button", 
-          icon: "navigation-menu", 
-          onTouchTap: this._onMenuIconButtonTouchTap}
-        )
-      );
-    }
-
-    return (
-      React.createElement(Paper, {rounded: false, className: classes, zDepth: this.props.zDepth}, 
-        menuIconButton, 
-        title, 
-        this.props.children
-      )
-    );
-  },
-
-  _onMenuIconButtonTouchTap: function(e) {
-    if (this.props.onMenuIconButtonTouchTap) this.props.onMenuIconButtonTouchTap(e);
-  }
-
-});
-
-module.exports = AppBar;
-},{"./icon-button.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\icon-button.jsx","./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./paper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\paper.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\app-canvas.jsx":[function(require,module,exports){
-var React = require('react'),
-  Classable = require('./mixins/classable.js');
-
-var AppCanvas = React.createClass({displayName: "AppCanvas",
-
-  mixins: [Classable],
-
-  propTypes: {
-    predefinedLayout: React.PropTypes.number
-  },
-
-  render: function() {
-    var classes = this.getClasses({
-      'mui-app-canvas': true,
-      'mui-predefined-layout-1': this.props.predefinedLayout === 1
-    });
-
-    return (
-      React.createElement("div", {className: classes}, 
-        this.props.children
-      )
-    );
-  }
-
-});
-
-module.exports = AppCanvas;
-
-},{"./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\checkbox.jsx":[function(require,module,exports){
-var React = require('react'),
-    Classable = require('./mixins/classable.js');
-
-var Checkbox = React.createClass({displayName: "Checkbox",
-
-  propTypes: {
-    checked: React.PropTypes.bool,
-    name: React.PropTypes.string.isRequired,
-    onCheck: React.PropTypes.func,
-    value: React.PropTypes.string.isRequired,
-    onClick: React.PropTypes.func
-  },
-
-  mixins: [Classable],
-
-  getInitialState: function() {
-    return {
-      checked: this.props.checked || false
-    }
-  },
-
-  componentWillReceiveProps: function(nextProps) {
-    if (nextProps.hasOwnProperty('checked')) this.setState({checked: nextProps.checked});
-  },
-
-  check: function() {
-    this.setState({ checked: !this.state.checked });
-    this.refs.checkbox.getDOMNode().checked = !this.refs.checkbox.getDOMNode().checked;
-
-  },
-
-  render: function() {
-    var classes = this.getClasses('mui-checkbox', {
-      'mui-checked': this.state.checked === true
-    })
-
-    return (
-      React.createElement("div", {className: classes, onClick: this._onCheck}, 
-        React.createElement("input", {ref: "checkbox", type: "checkbox", name: this.props.name, value: this.props.value}), 
-        React.createElement("span", {className: "mui-checkbox-box"}), 
-        React.createElement("span", {className: "mui-checkbox-check"})
-      )
-    );
-  },
-
-  _onCheck: function(e) {
-    var checkedState = this.state.checked;
-
-    this.check();
-
-    if (this.props.onClick) this.props.onClick(e, !checkedState);
-  }
-
-});
-
-module.exports = Checkbox;
-
-},{"./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\date-picker\\calendar-month.jsx":[function(require,module,exports){
-var React = require('react');
-var Classable = require('../mixins/classable');
-var DateTime = require('../utils/date-time.js');
-var DayButton = require('./day-button.jsx');
-
-var CalendarMonth = React.createClass({displayName: "CalendarMonth",
-
-  mixins: [Classable],
-
-  propTypes: {
-    displayDate: React.PropTypes.object.isRequired,
-    onDayTouchTap: React.PropTypes.func,
-    selectedDate: React.PropTypes.object.isRequired
-  },
-
-  render: function() {
-    var classes = this.getClasses('mui-date-picker-calendar-month');
-
-    return (
-      React.createElement("div", {className: classes}, 
-        this._getWeekElements()
-      )
-    );
-  },
-
-  _getWeekElements: function() {
-    var weekArray = DateTime.getWeekArray(this.props.displayDate);
-
-    return weekArray.map(function(week) {
-      return (
-        React.createElement("div", {className: "mui-date-picker-calendar-month-week"}, 
-          this._getDayElements(week)
-        )
-      );
-    }, this);
-  },
-
-  _getDayElements: function(week) {
-    return week.map(function(day) {
-      var selected = DateTime.isEqualDate(this.props.selectedDate, day);
-      return (
-        React.createElement(DayButton, {
-          date: day, 
-          onTouchTap: this._handleDayTouchTap, 
-          selected: selected})
-      );
-    }, this);
-  },
-
-  _handleDayTouchTap: function(e, date) {
-    if (this.props.onDayTouchTap) this.props.onDayTouchTap(e, date);
-  }
-
-});
-
-module.exports = CalendarMonth;
-},{"../mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","../utils/date-time.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\date-time.js","./day-button.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\date-picker\\day-button.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\date-picker\\calendar-toolbar.jsx":[function(require,module,exports){
-var React = require('react');
-var DateTime = require('../utils/date-time.js');
-var IconButton = require('../icon-button.jsx');
-var SlideInTransitionGroup = require('../transitions/slide-in.jsx');
-
-var CalendarToolbar = React.createClass({displayName: "CalendarToolbar",
-
-  propTypes: {
-    displayDate: React.PropTypes.object.isRequired,
-    onLeftTouchTap: React.PropTypes.func,
-    onRightTouchTap: React.PropTypes.func
-  },
-
-  getInitialState: function() {
-    return {
-      transitionDirection: 'up'
-    };
-  },
-
-  componentWillReceiveProps: function(nextProps) {
-    var direction;
-
-    if (nextProps.displayDate !== this.props.displayDate) {
-      direction = nextProps.displayDate > this.props.displayDate ? 'up' : 'down';
-      this.setState({
-        transitionDirection: direction
-      });
-    }
-  },
-
-  render: function() {
-    var month = DateTime.getFullMonth(this.props.displayDate);
-    var year = this.props.displayDate.getFullYear();
-
-    return (
-      React.createElement("div", {className: "mui-date-picker-calendar-toolbar"}, 
-
-        React.createElement(SlideInTransitionGroup, {
-          className: "mui-date-picker-calendar-toolbar-title", 
-          direction: this.state.transitionDirection}, 
-          React.createElement("div", {key: month + '_' + year}, month, " ", year)
-        ), 
-
-        React.createElement(IconButton, {
-          className: "mui-date-picker-calendar-toolbar-button-left", 
-          icon: "navigation-chevron-left", 
-          onTouchTap: this.props.onLeftTouchTap}), 
-
-        React.createElement(IconButton, {
-          className: "mui-date-picker-calendar-toolbar-button-right", 
-          icon: "navigation-chevron-right", 
-          onTouchTap: this.props.onRightTouchTap})
-
-      )
-    );
-  }
-
-});
-
-module.exports = CalendarToolbar;
-},{"../icon-button.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\icon-button.jsx","../transitions/slide-in.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\transitions\\slide-in.jsx","../utils/date-time.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\date-time.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\date-picker\\calendar.jsx":[function(require,module,exports){
-var React = require('react');
-var Classable = require('../mixins/classable.js');
-var WindowListenable = require('../mixins/window-listenable.js');
-var DateTime = require('../utils/date-time.js');
-var KeyCode = require('../utils/key-code.js');
-var CalendarMonth = require('./calendar-month.jsx');
-var CalendarToolbar = require('./calendar-toolbar.jsx');
-var DateDisplay = require('./date-display.jsx');
-var SlideInTransitionGroup = require('../transitions/slide-in.jsx');
-
-var Calendar = React.createClass({displayName: "Calendar",
-
-  mixins: [Classable, WindowListenable],
-
-  propTypes: {
-    initialDate: React.PropTypes.object,
-    isActive: React.PropTypes.bool
-  },
-
-  windowListeners: {
-    'keydown': '_handleWindowKeyDown'
-  },
-
-  getDefaultProps: function() {
-    return {
-      initialDate: new Date()
-    };
-  },
-
-  getInitialState: function() {
-    return {
-      displayDate: DateTime.getFirstDayOfMonth(this.props.initialDate),
-      selectedDate: this.props.initialDate,
-      transitionDirection: 'left'
-    };
-  },
-
-  componentWillReceiveProps: function(nextProps) {
-    if (nextProps.initialDate !== this.props.initialDate) {
-      var d = nextProps.initialDate || new Date();
-      this.setState({
-        displayDate: DateTime.getFirstDayOfMonth(d),
-        selectedDate: d
-      });
-    }
-  },
-
-  render: function() {
-    var weekCount = DateTime.getWeekArray(this.state.displayDate).length;
-    var classes = this.getClasses('mui-date-picker-calendar', {
-      'mui-is-4week': weekCount === 4,
-      'mui-is-5week': weekCount === 5,
-      'mui-is-6week': weekCount === 6
-    });
-
-    return (
-      React.createElement("div", {className: classes}, 
-
-        React.createElement(DateDisplay, {
-          className: "mui-date-picker-calendar-date-display", 
-          selectedDate: this.state.selectedDate}), 
-
-        React.createElement("div", {
-          className: "mui-date-picker-calendar-container"}, 
-          React.createElement(CalendarToolbar, {
-            displayDate: this.state.displayDate, 
-            onLeftTouchTap: this._handleLeftTouchTap, 
-            onRightTouchTap: this._handleRightTouchTap}), 
-
-          React.createElement("ul", {className: "mui-date-picker-calendar-week-title"}, 
-            React.createElement("li", {className: "mui-date-picker-calendar-week-title-day"}, "S"), 
-            React.createElement("li", {className: "mui-date-picker-calendar-week-title-day"}, "M"), 
-            React.createElement("li", {className: "mui-date-picker-calendar-week-title-day"}, "T"), 
-            React.createElement("li", {className: "mui-date-picker-calendar-week-title-day"}, "W"), 
-            React.createElement("li", {className: "mui-date-picker-calendar-week-title-day"}, "T"), 
-            React.createElement("li", {className: "mui-date-picker-calendar-week-title-day"}, "F"), 
-            React.createElement("li", {className: "mui-date-picker-calendar-week-title-day"}, "S")
-          ), 
-
-          React.createElement(SlideInTransitionGroup, {
-            direction: this.state.transitionDirection}, 
-            React.createElement(CalendarMonth, {
-              key: this.state.displayDate.toDateString(), 
-              displayDate: this.state.displayDate, 
-              onDayTouchTap: this._handleDayTouchTap, 
-              selectedDate: this.state.selectedDate})
-          )
-        )
-      )
-    );
-  },
-
-  getSelectedDate: function() {
-    return this.state.selectedDate;
-  },
-
-  _addDisplayDate: function(m) {
-    var newDisplayDate = DateTime.clone(this.state.displayDate);
-    newDisplayDate.setMonth(newDisplayDate.getMonth() + m);
-    this._setDisplayDate(newDisplayDate);
-  },
-
-  _addSelectedDays: function(days) {
-    this._setSelectedDate(DateTime.addDays(this.state.selectedDate, days));
-  },
-
-  _addSelectedMonths: function(months) {
-    this._setSelectedDate(DateTime.addMonths(this.state.selectedDate, months));
-  },
-
-  _setDisplayDate: function(d, newSelectedDate) {
-    var newDisplayDate = DateTime.getFirstDayOfMonth(d);
-    var direction = newDisplayDate > this.state.displayDate ? 'left' : 'right';
-
-    if (newDisplayDate !== this.state.displayDate) {
-      this.setState({
-        displayDate: newDisplayDate,
-        transitionDirection: direction,
-        selectedDate: newSelectedDate || this.state.selectedDate
-      });
-    }
-  },
-
-  _setSelectedDate: function(d) {
-    var newDisplayDate = DateTime.getFirstDayOfMonth(d);
-
-    if (newDisplayDate !== this.state.displayDate) {
-      this._setDisplayDate(newDisplayDate, d);
-    } else {
-      this.setState({
-        selectedDate: d
-      });
-    }
-  },
-
-  _handleDayTouchTap: function(e, date) {
-    this._setSelectedDate(date);
-  },
-
-  _handleLeftTouchTap: function() {
-    this._addDisplayDate(-1);
-  },
-
-  _handleRightTouchTap: function() {
-    this._addDisplayDate(1);
-  },
-
-  _handleWindowKeyDown: function(e) {
-    var newSelectedDate;
-
-    if (this.props.isActive) {
-
-      switch (e.keyCode) {
-
-        case KeyCode.UP:
-          if (e.shiftKey) {
-            this._addSelectedMonths(-1);
-          } else {
-            this._addSelectedDays(-7);
-          }
-          break;
-
-        case KeyCode.DOWN:
-          if (e.shiftKey) {
-            this._addSelectedMonths(1);
-          } else {
-            this._addSelectedDays(7);
-          }
-          break;
-
-        case KeyCode.RIGHT:
-          if (e.shiftKey) {
-            this._addSelectedMonths(1);
-          } else {
-            this._addSelectedDays(1);
-          }
-          break;
-
-        case KeyCode.LEFT:
-          if (e.shiftKey) {
-            this._addSelectedMonths(-1);
-          } else {
-            this._addSelectedDays(-1);
-          }
-          break;
-
-      }
-
-    } 
-  }
-
-});
-
-module.exports = Calendar;
-},{"../mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","../mixins/window-listenable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\window-listenable.js","../transitions/slide-in.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\transitions\\slide-in.jsx","../utils/date-time.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\date-time.js","../utils/key-code.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\key-code.js","./calendar-month.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\date-picker\\calendar-month.jsx","./calendar-toolbar.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\date-picker\\calendar-toolbar.jsx","./date-display.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\date-picker\\date-display.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\date-picker\\date-display.jsx":[function(require,module,exports){
-var React = require('react');
-var Classable = require('../mixins/classable.js');
-var DateTime = require('../utils/date-time.js');
-var SlideInTransitionGroup = require('../transitions/slide-in.jsx');
-
-var DateDisplay = React.createClass({displayName: "DateDisplay",
-
-  mixins: [Classable],
-
-  propTypes: {
-    selectedDate: React.PropTypes.object.isRequired
-  },
-
-  getInitialState: function() {
-    return {
-      transitionDirection: 'up'
-    };
-  },
-
-  componentWillReceiveProps: function(nextProps) {
-    var direction;
-
-    if (nextProps.selectedDate !== this.props.selectedDate) {
-      direction = nextProps.selectedDate > this.props.selectedDate ? 'up' : 'down';
-      this.setState({
-        transitionDirection: direction
-      });
-    }
-  },
-
-  render: function() {
-    var $__0=
-      
-      
-      this.props,selectedDate=$__0.selectedDate,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{selectedDate:1});
-    var classes = this.getClasses('mui-date-picker-date-display');
-    var dayOfWeek = DateTime.getDayOfWeek(this.props.selectedDate);
-    var month = DateTime.getShortMonth(this.props.selectedDate);
-    var day = this.props.selectedDate.getDate();
-    var year = this.props.selectedDate.getFullYear();
-
-    return (
-      React.createElement("div", React.__spread({},  other, {className: classes}), 
-
-        React.createElement(SlideInTransitionGroup, {
-          className: "mui-date-picker-date-display-dow", 
-          direction: this.state.transitionDirection}, 
-          React.createElement("div", {key: dayOfWeek}, dayOfWeek)
-        ), 
-
-        React.createElement("div", {className: "mui-date-picker-date-display-date"}, 
-
-          React.createElement(SlideInTransitionGroup, {
-            className: "mui-date-picker-date-display-month", 
-            direction: this.state.transitionDirection}, 
-            React.createElement("div", {key: month}, month)
-          ), 
-
-          React.createElement(SlideInTransitionGroup, {
-            className: "mui-date-picker-date-display-day", 
-            direction: this.state.transitionDirection}, 
-            React.createElement("div", {key: day}, day)
-          ), 
-
-          React.createElement(SlideInTransitionGroup, {
-            className: "mui-date-picker-date-display-year", 
-            direction: this.state.transitionDirection}, 
-            React.createElement("div", {key: year}, year)
-          )
-
-        )
-
-      )
-    );
-  }
-
-});
-
-module.exports = DateDisplay;
-},{"../mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","../transitions/slide-in.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\transitions\\slide-in.jsx","../utils/date-time.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\date-time.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\date-picker\\date-picker-dialog.jsx":[function(require,module,exports){
-var React = require('react');
-var Classable = require('../mixins/classable.js');
-var WindowListenable = require('../mixins/window-listenable.js');
-var KeyCode = require('../utils/key-code.js');
-var Calendar = require('./calendar.jsx');
-var DialogWindow = require('../dialog-window.jsx');
-var FlatButton = require('../flat-button.jsx');
-
-var DatePickerDialog = React.createClass({displayName: "DatePickerDialog",
-
-  mixins: [Classable, WindowListenable],
-
-  propTypes: {
-    initialDate: React.PropTypes.object,
-    onAccept: React.PropTypes.func
-  },
-
-  windowListeners: {
-    'keyup': '_handleWindowKeyUp'
-  },
-
-  getInitialState: function() {
-    return {
-      isCalendarActive: false
-    };
-  },
-
-  render: function() {
-    var $__0=
-      
-      
-      
-      this.props,initialDate=$__0.initialDate,onAccept=$__0.onAccept,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{initialDate:1,onAccept:1});
-    var classes = this.getClasses('mui-date-picker-dialog');
-    var actions = [
-      React.createElement(FlatButton, {
-        key: 0, 
-        label: "Cancel", 
-        secondary: true, 
-        onTouchTap: this._handleCancelTouchTap}),
-      React.createElement(FlatButton, {
-        key: 1, 
-        label: "OK", 
-        secondary: true, 
-        onTouchTap: this._handleOKTouchTap})
-    ];
-
-    return (
-      React.createElement(DialogWindow, React.__spread({},  other, 
-        {ref: "dialogWindow", 
-        className: classes, 
-        actions: actions, 
-        contentClassName: "mui-date-picker-dialog-window", 
-        onDismiss: this._handleDialogDismiss, 
-        onShow: this._handleDialogShow, 
-        repositionOnUpdate: false}), 
-        React.createElement(Calendar, {
-          ref: "calendar", 
-          initialDate: this.props.initialDate, 
-          isActive: this.state.isCalendarActive})
-      )
-    );
-  },
-
-  show: function() {
-    this.refs.dialogWindow.show();
-  },
-
-  dismiss: function() {
-    this.refs.dialogWindow.dismiss();
-  },
-
-  _handleCancelTouchTap: function() {
-    this.dismiss();
-  },
-
-  _handleOKTouchTap: function() {
-    this.dismiss();
-    if (this.props.onAccept) {
-      this.props.onAccept(this.refs.calendar.getSelectedDate());
-    }
-  },
-
-  _handleDialogShow: function() {
-    this.setState({
-      isCalendarActive: true
-    });
-  },
-
-  _handleDialogDismiss: function() {
-    this.setState({
-      isCalendarActive: false
-    });
-  },
-
-  _handleWindowKeyUp: function(e) {
-    if (this.refs.dialogWindow.isOpen()) {
-      switch (e.keyCode) {
-        case KeyCode.ENTER:
-          this._handleOKTouchTap();
-          break;
-      }
-    } 
-  }
-
-});
-
-module.exports = DatePickerDialog;
-},{"../dialog-window.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\dialog-window.jsx","../flat-button.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\flat-button.jsx","../mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","../mixins/window-listenable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\window-listenable.js","../utils/key-code.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\key-code.js","./calendar.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\date-picker\\calendar.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\date-picker\\date-picker.jsx":[function(require,module,exports){
-var React = require('react');
-var Classable = require('../mixins/classable.js');
-var WindowListenable = require('../mixins/window-listenable.js');
-var DateTime = require('../utils/date-time.js');
-var KeyCode = require('../utils/key-code.js');
-var DatePickerDialog = require('./date-picker-dialog.jsx');
-var Input = require('../input.jsx');
-
-var DatePicker = React.createClass({displayName: "DatePicker",
-
-  mixins: [Classable, WindowListenable],
-
-  propTypes: {
-    defaultDate: React.PropTypes.object,
-    formatDate: React.PropTypes.func,
-    mode: React.PropTypes.oneOf(['portrait', 'landscape', 'inline']),
-    onFocus: React.PropTypes.func,
-    onTouchTap: React.PropTypes.func
-  },
-
-  windowListeners: {
-    'keyup': '_handleWindowKeyUp'
-  },
-
-  getDefaultProps: function() {
-    return {
-      formatDate: DateTime.format
-    };
-  },
-
-  getInitialState: function() {
-    return {
-      date: this.props.defaultDate,
-      dialogDate: new Date()
-    };
-  },
-
-  render: function() {
-    var $__0=
-      
-      
-      
-      
-      
-      this.props,formatDate=$__0.formatDate,mode=$__0.mode,onFocus=$__0.onFocus,onTouchTap=$__0.onTouchTap,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{formatDate:1,mode:1,onFocus:1,onTouchTap:1});
-    var classes = this.getClasses('mui-date-picker', {
-      'mui-is-landscape': this.props.mode === 'landscape',
-      'mui-is-inline': this.props.mode === 'inline'
-    });
-    var defaultInputValue;
-
-    if (this.props.defaultDate) {
-      defaultInputValue = this.props.formatDate(this.props.defaultDate);
-    }
-
-    return (
-      React.createElement("div", {className: classes}, 
-        React.createElement(Input, React.__spread({}, 
-          other, 
-          {ref: "input", 
-          defaultValue: defaultInputValue, 
-          onFocus: this._handleInputFocus, 
-          onTouchTap: this._handleInputTouchTap})), 
-        React.createElement(DatePickerDialog, {
-          ref: "dialogWindow", 
-          initialDate: this.state.dialogDate, 
-          onAccept: this._handleDialogAccept})
-      )
-      
-    );
-  },
-
-  getDate: function() {
-    return this.state.value;
-  },
-
-  setDate: function(d) {
-    this.setState({
-      date: d
-    });
-    this.refs.input.setValue(this.props.formatDate(d));
-  },
-
-  _handleDialogAccept: function(d) {
-    this.setDate(d);
-  },
-
-  _handleInputFocus: function(e) {
-    e.target.blur();
-    if (this.props.onFocus) this.props.onFocus(e);
-  },
-
-  _handleInputTouchTap: function(e) {
-    var dateString = this.refs.input.getValue();
-    var inputDate = dateString ? new Date(dateString) : new Date();
-
-    this.setState({
-      dialogDate: inputDate
-    });
-
-    this.refs.dialogWindow.show();
-    if (this.props.onTouchTap) this.props.onTouchTap(e);
-  },
-
-  _handleWindowKeyUp: function(e) {
-    //TO DO: open the dialog if input has focus
-  }
-
-});
-
-module.exports = DatePicker;
-},{"../input.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\input.jsx","../mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","../mixins/window-listenable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\window-listenable.js","../utils/date-time.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\date-time.js","../utils/key-code.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\key-code.js","./date-picker-dialog.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\date-picker\\date-picker-dialog.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\date-picker\\day-button.jsx":[function(require,module,exports){
-var React = require('react');
-var Classable = require('../mixins/classable.js');
-var DateTime = require('../utils/date-time.js');
-var EnhancedButton = require('../enhanced-button.jsx');
-
-var DayButton = React.createClass({displayName: "DayButton",
-
-  mixins: [Classable],
-
-  propTypes: {
-    date: React.PropTypes.object,
-    onTouchTap: React.PropTypes.func,
-    selected: React.PropTypes.bool
-  },
-
-  render: function() {
-    var $__0=
-      
-      
-      
-      
-      
-      this.props,className=$__0.className,date=$__0.date,onTouchTap=$__0.onTouchTap,selected=$__0.selected,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,date:1,onTouchTap:1,selected:1});
-    var classes = this.getClasses('mui-date-picker-day-button', { 
-      'mui-is-current-date': DateTime.isEqualDate(this.props.date, new Date()),
-      'mui-is-selected': this.props.selected
-    });
-
-    return this.props.date ? (
-      React.createElement(EnhancedButton, React.__spread({},  other, {className: classes, onTouchTap: this._handleTouchTap}), 
-        React.createElement("div", {className: "mui-date-picker-day-button-select"}), 
-        React.createElement("span", {className: "mui-date-picker-day-button-label"}, this.props.date.getDate())
-      )
-    ) : (
-      React.createElement("span", {className: classes})
-    );
-  },
-
-  _handleTouchTap: function(e) {
-    if (this.props.onTouchTap) this.props.onTouchTap(e, this.props.date);
-  }
-
-});
-
-module.exports = DayButton;
-},{"../enhanced-button.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\enhanced-button.jsx","../mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","../utils/date-time.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\date-time.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\dialog-window.jsx":[function(require,module,exports){
-var React = require('react');
-var WindowListenable = require('./mixins/window-listenable.js');
-var CssEvent = require('./utils/css-event.js');
-var KeyCode = require('./utils/key-code.js');
-var Classable = require('./mixins/classable');
-var Overlay = require('./overlay.jsx');
-var Paper = require('./paper.jsx');
-
-var DialogWindow = React.createClass({displayName: "DialogWindow",
-
-  mixins: [Classable, WindowListenable],
-
-  propTypes: {
-    actions: React.PropTypes.array,
-    contentClassName: React.PropTypes.string,
-    openImmediately: React.PropTypes.bool,
-    onClickAway: React.PropTypes.func,
-    onDismiss: React.PropTypes.func,
-    onShow: React.PropTypes.func,
-    repositionOnUpdate: React.PropTypes.bool
-  },
-
-  windowListeners: {
-    'keyup': '_handleWindowKeyUp'
-  },
-
-  getDefaultProps: function() {
-    return {
-      actions: [],
-      repositionOnUpdate: true
-    };
-  },
-
-  getInitialState: function() {
-    return {
-      open: this.props.openImmediately || false
-    };
-  },
-
-  componentDidMount: function() {
-    this._positionDialog();
-  },
-
-  componentDidUpdate: function (prevProps, prevState) {
-    this._positionDialog();
-  },
-
-  render: function() {
-    var classes = this.getClasses('mui-dialog-window', { 
-      'mui-is-shown': this.state.open
-    });
-    var contentClasses = 'mui-dialog-window-contents';
-    var actions = this._getActions();
-
-    if (this.props.contentClassName) {
-      contentClasses += ' ' + this.props.contentClassName;
-    }
-
-    return (
-      React.createElement("div", {className: classes}, 
-        React.createElement(Paper, {ref: "dialogWindow", className: contentClasses, zDepth: 4}, 
-          this.props.children, 
-          actions
-        ), 
-        React.createElement(Overlay, {show: this.state.open, onTouchTap: this._handleOverlayTouchTap})
-      )
-    );
-  },
-
-  isOpen: function() {
-    return this.state.open;
-  },
-
-  dismiss: function() {
-
-    CssEvent.onTransitionEnd(this.getDOMNode(), function() {
-      //allow scrolling
-      var body = document.getElementsByTagName('body')[0];
-      body.style.overflow = '';
-      body.style.position = '';
-    });
-
-    this.setState({ open: false });
-    if (this.props.onDismiss) this.props.onDismiss();
-  },
-
-  show: function() {
-    //prevent scrolling
-    var body = document.getElementsByTagName('body')[0];
-    body.style.overflow = 'hidden';
-    body.style.position = 'fixed';
-
-    this.setState({ open: true });
-    if (this.props.onShow) this.props.onShow();
-  },
-
-  _getActions: function() {
-    var actionContainer;
-    var actions = this.props.actions;
-    var actionClassName;
-
-    if (actions.length) {
-
-      for (var i = 0; i < actions.length; i++) {
-        actionClassName = actions[i].props.className;
-
-        actions[i].props.className = actionClassName ?
-          actionClassName + ' mui-dialog-window-action' :
-          'mui-dialog-window-action';
-      };
-
-      actionContainer = (
-        React.createElement("div", {className: "mui-dialog-window-actions"}, 
-          actions
-        )
-      );
-
-    }
-
-    return actionContainer;
-  },
-
-  _positionDialog: function() {
-    var container, dialogWindow, containerHeight, dialogWindowHeight;
-
-    if (this.state.open) {
-
-      container = this.getDOMNode(),
-      dialogWindow = this.refs.dialogWindow.getDOMNode(),
-      containerHeight = container.offsetHeight,
-
-      //Reset the height in case the window was resized.
-      dialogWindow.style.height = '';
-      dialogWindowHeight = dialogWindow.offsetHeight;
-
-      //Vertically center the dialog window, but make sure it doesn't
-      //transition to that position.
-      if (this.props.repositionOnUpdate || !container.style.paddingTop) {
-        container.style.paddingTop = 
-          ((containerHeight - dialogWindowHeight) / 2) - 64 + 'px';
-      }
-      
-
-    }
-  },
-
-  _handleOverlayTouchTap: function() {
-    this.dismiss();
-    if (this.props.onClickAway) this.props.onClickAway();
-  },
-
-  _handleWindowKeyUp: function(e) {
-    if (e.keyCode == KeyCode.ESC) {
-      this.dismiss();
-    }
-  }
-
-});
-
-module.exports = DialogWindow;
-},{"./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./mixins/window-listenable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\window-listenable.js","./overlay.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\overlay.jsx","./paper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\paper.jsx","./utils/css-event.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\css-event.js","./utils/key-code.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\key-code.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\dialog.jsx":[function(require,module,exports){
-var React = require('react');
-var Classable = require('./mixins/classable');
-var DialogWindow = require('./dialog-window.jsx');
-var FlatButton = require('./flat-button.jsx');
-
-var Dialog = React.createClass({displayName: "Dialog",
-
-  mixins: [Classable],
-
-  propTypes: {
-    title: React.PropTypes.string,
-    actions: React.PropTypes.array
-  },
-
-  getDefaultProps: function() {
-    return {
-      actions: []
-    };
-  },
-
-  render: function() {
-    var $__0=
-      
-      
-      
-      
-      this.props,className=$__0.className,title=$__0.title,actions=$__0.actions,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,title:1,actions:1});
-    var classes = this.getClasses('mui-dialog');
-    var actions = this._getDialogActions();
-
-    return (
-      React.createElement(DialogWindow, React.__spread({}, 
-        other, 
-        {ref: "dialogWindow", 
-        className: classes, 
-        actions: actions}), 
-
-        React.createElement("h3", {className: "mui-dialog-title"}, this.props.title), 
-        React.createElement("div", {ref: "dialogContent", className: "mui-dialog-content"}, 
-          this.props.children
-        )
-        
-      )
-    );
-  },
-
-  dismiss: function() {
-    this.refs.dialogWindow.dismiss();
-  },
-
-  show: function() {
-    this.refs.dialogWindow.show();
-  },
-
-  _getDialogActions: function() {
-    return this.props.actions.map(function(a, index) {
-      var onClickHandler = a.onClick ? a.onClick : this.dismiss;
-      return (
-        React.createElement(FlatButton, {
-          key: index, 
-          secondary: true, 
-          onClick: onClickHandler, 
-          label: a.text})
-      );
-    }.bind(this));
-  }
-
-});
-
-module.exports = Dialog;
-},{"./dialog-window.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\dialog-window.jsx","./flat-button.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\flat-button.jsx","./mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\drop-down-icon.jsx":[function(require,module,exports){
-var React = require('react'),
-  Classable = require('./mixins/classable.js'),
-  ClickAwayable = require('./mixins/click-awayable'),
-  KeyLine = require('./utils/key-line.js'),
-  Paper = require('./paper.jsx'),
-  Icon = require('./icon.jsx'),
-  Menu = require('./menu.jsx'),
-  MenuItem = require('./menu-item.jsx');
-
-var DropDownIcon = React.createClass({displayName: "DropDownIcon",
-
-  mixins: [Classable, ClickAwayable],
-
-  propTypes: {
-    onChange: React.PropTypes.func,
-    menuItems: React.PropTypes.array.isRequired
-  },
-
-  getInitialState: function() {
-    return {
-      open: false
-    }
-  },
-
-  componentClickAway: function() {
-    this.setState({ open: false });
-  },
-
-  render: function() {
-    var classes = this.getClasses('mui-drop-down-icon', {
-      'mui-open': this.state.open
-    });
-
-    return (
-      React.createElement("div", {className: classes}, 
-          React.createElement("div", {className: "mui-menu-control", onClick: this._onControlClick}, 
-              React.createElement(Icon, {icon: this.props.icon})
-          ), 
-          React.createElement(Menu, {ref: "menuItems", menuItems: this.props.menuItems, hideable: true, visible: this.state.open, onItemClick: this._onMenuItemClick})
-        )
-    );
-  },
-
-  _onControlClick: function(e) {
-    this.setState({ open: !this.state.open });
-  },
-
-  _onMenuItemClick: function(e, key, payload) {
-    if (this.props.onChange) this.props.onChange(e, key, payload);
-    this.setState({ open: false });
-  }
-
-});
-
-module.exports = DropDownIcon;
-
-},{"./icon.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\icon.jsx","./menu-item.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\menu-item.jsx","./menu.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\menu.jsx","./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./mixins/click-awayable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\click-awayable.js","./paper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\paper.jsx","./utils/key-line.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\key-line.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\drop-down-menu.jsx":[function(require,module,exports){
-var React = require('react'),
-  Classable = require('./mixins/classable.js'),
-  ClickAwayable = require('./mixins/click-awayable'),
-  KeyLine = require('./utils/key-line.js'),
-  Paper = require('./paper.jsx'),
-  Icon = require('./icon.jsx'),
-  Menu = require('./menu.jsx');
-
-var DropDownMenu = React.createClass({displayName: "DropDownMenu",
-
-  mixins: [Classable, ClickAwayable],
-
-  propTypes: {
-    autoWidth: React.PropTypes.bool,
-    onChange: React.PropTypes.func,
-    menuItems: React.PropTypes.array.isRequired
-  },
-
-  getDefaultProps: function() {
-    return {
-      autoWidth: true
-    };
-  },
-
-  getInitialState: function() {
-    return {
-      open: false,
-      selectedIndex: this.props.selectedIndex || 0
-    }
-  },
-
-  componentClickAway: function() {
-    this.setState({ open: false });
-  },
-
-  componentDidMount: function() {
-    if (this.props.autoWidth) this._setWidth();
-  },
-
-  componentWillReceiveProps: function(nextProps) {
-    if (nextProps.hasOwnProperty('selectedIndex')) {
-      this.setState({selectedIndex: nextProps.selectedIndex});
-    }
-  },
-
-  render: function() {
-    var classes = this.getClasses('mui-drop-down-menu', {
-      'mui-open': this.state.open
-    });
-
-    return (
-      React.createElement("div", {className: classes}, 
-        React.createElement("div", {className: "mui-menu-control", onClick: this._onControlClick}, 
-          React.createElement(Paper, {className: "mui-menu-control-bg", zDepth: 0}), 
-          React.createElement("div", {className: "mui-menu-label"}, 
-            this.props.menuItems[this.state.selectedIndex].text
-          ), 
-          React.createElement(Icon, {className: "mui-menu-drop-down-icon", icon: "navigation-arrow-drop-down"}), 
-          React.createElement("div", {className: "mui-menu-control-underline"})
-        ), 
-        React.createElement(Menu, {
-          ref: "menuItems", 
-          autoWidth: this.props.autoWidth, 
-          selectedIndex: this.state.selectedIndex, 
-          menuItems: this.props.menuItems, 
-          hideable: true, 
-          visible: this.state.open, 
-          onItemClick: this._onMenuItemClick})
-      )
-    );
-  },
-
-  _setWidth: function() {
-    var el = this.getDOMNode(),
-      menuItemsDom = this.refs.menuItems.getDOMNode();
-
-    el.style.width = menuItemsDom.offsetWidth + 'px';
-  },
-
-  _onControlClick: function(e) {
-    this.setState({ open: !this.state.open });
-  },
-
-  _onMenuItemClick: function(e, key, payload) {
-    if (this.props.onChange && this.state.selectedIndex !== key) this.props.onChange(e, key, payload);
-    this.setState({
-      selectedIndex: key,
-      open: false
-    });
-  }
-
-});
-
-module.exports = DropDownMenu;
-},{"./icon.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\icon.jsx","./menu.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\menu.jsx","./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./mixins/click-awayable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\click-awayable.js","./paper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\paper.jsx","./utils/key-line.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\key-line.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\enhanced-button.jsx":[function(require,module,exports){
-var React = require('react');
-var KeyCode = require('./utils/key-code.js');
-var Classable = require('./mixins/classable.js');
-var WindowListenable = require('./mixins/window-listenable');
-
-var EnhancedButton = React.createClass({displayName: "EnhancedButton",
-
-  mixins: [Classable, WindowListenable],
-
-  propTypes: {
-    className: React.PropTypes.string,
-    disabled: React.PropTypes.bool,
-    linkButton: React.PropTypes.bool,
-    onBlur: React.PropTypes.func,
-    onFocus: React.PropTypes.func,
-    onTouchTap: React.PropTypes.func
-  },
-
-  windowListeners: {
-    'keyup': '_onWindowKeyUp'
-  },
-
-  getInitialState: function() {
-    return {
-      isKeyboardFocused: false 
-    };
-  },
-
-  render: function() {
-    var $__0=
-      
-      
-      
-      
-      
-         this.props,className=$__0.className,disabled=$__0.disabled,icon=$__0.icon,linkButton=$__0.linkButton,onTouchTap=$__0.onTouchTap,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,disabled:1,icon:1,linkButton:1,onTouchTap:1});
-    var classes = this.getClasses('mui-enhanced-button', {
-      'mui-is-disabled': disabled,
-      'mui-is-keyboard-focused': this.state.isKeyboardFocused,
-      'mui-is-link-button': linkButton
-    });
-
-    return this.props.linkButton ? (
-      this.props.disabled ? (
-        React.createElement("span", React.__spread({},  other, 
-          {className: classes, 
-          disabled: disabled}), 
-          this.props.children
-        )
-      ) : (
-        React.createElement("a", React.__spread({},  other, 
-          {className: classes, 
-          disabled: disabled, 
-          onBlur: this._onBlur, 
-          onFocus: this._onFocus, 
-          onTouchTap: this._onTouchTap}), 
-          this.props.children
-        )
-      )
-    ) : (
-      React.createElement("button", React.__spread({},  other, 
-        {className: classes, 
-        disabled: disabled, 
-        onBlur: this._onBlur, 
-        onFocus: this._onFocus, 
-        onTouchTap: this._onTouchTap}), 
-        this.props.children
-      )
-    );
-  },
-
-  isKeyboardFocused: function() {
-    return this.state.isKeyboardFocused;
-  },
-
-  _onWindowKeyUp: function(e) {
-    if (e.keyCode == KeyCode.TAB) this._tabPressed = true;
-    if (e.keyCode == KeyCode.ENTER && this.state.isKeyboardFocused) {
-      this._onTouchTap(e);
-    }
-  },
-
-  _onBlur: function(e) {
-    this.setState({
-      isKeyboardFocused: false
-    });
-
-    if (this.props.onBlur) this.props.onBlur(e);
-  },
-
-  _onFocus: function(e) {
-    //setTimeout is needed becuase the focus event fires first
-    //Wait so that we can capture if this was a keyboard focus
-    //or touch focus
-    setTimeout(function() {
-      if (this._tabPressed) {
-        this.setState({
-          isKeyboardFocused: true
-        });
-      }
-    }.bind(this), 150);
-    
-    if (this.props.onFocus) this.props.onFocus(e);
-  },
-
-  _onTouchTap: function(e) {
-    this._tabPressed = false;
-    this.setState({
-      isKeyboardFocused: false
-    });
-    if (this.props.onTouchTap) this.props.onTouchTap(e);
-  }
-
-});
-
-module.exports = EnhancedButton;
-},{"./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./mixins/window-listenable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\window-listenable.js","./utils/key-code.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\key-code.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\flat-button.jsx":[function(require,module,exports){
-var React = require('react');
-var Classable = require('./mixins/classable.js');
-var EnhancedButton = require('./enhanced-button.jsx');
-var Ripple = require('./ripple.jsx');
-
-var FlatButton = React.createClass({displayName: "FlatButton",
-
-  mixins: [Classable],
-
-  propTypes: {
-    className: React.PropTypes.string,
-    label: React.PropTypes.string.isRequired,
-    onTouchTap: React.PropTypes.func,
-    primary: React.PropTypes.bool,
-    secondary: React.PropTypes.bool
-  },
-
-  render: function() {
-    var 
-      $__0=
-        
-        
-        
-        this.props,className=$__0.className,onTouchTap=$__0.onTouchTap,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,onTouchTap:1}),
-      classes = this.getClasses('mui-flat-button', {
-        'mui-is-primary': this.props.primary,
-        'mui-is-secondary': !this.props.primary && this.props.secondary
-      });
-
-    return (
-      React.createElement(EnhancedButton, React.__spread({},  other, 
-        {className: classes, 
-        onTouchTap: this._onTouchTap}), 
-
-        React.createElement(Ripple, {ref: "ripple", className: "mui-flat-button-ripple"}), 
-        React.createElement(Ripple, {className: "mui-flat-button-focus-ripple"}), 
-        this.props.label
-
-      )
-    );
-  },
-
-  _onTouchTap: function(e) {
-    if (!this.props.disabled) this.refs.ripple.animate(e);
-    if (this.props.onTouchTap) this.props.onTouchTap(e);
-  }
-
-});
-
-module.exports = FlatButton;
-},{"./enhanced-button.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\enhanced-button.jsx","./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./ripple.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\ripple.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\floating-action-button.jsx":[function(require,module,exports){
-var React = require('react');
-var CssEvent = require('./utils/css-event.js');
-var Classable = require('./mixins/classable.js');
-var EnhancedButton = require('./enhanced-button.jsx');
-var Icon = require('./icon.jsx');
-var Paper = require('./paper.jsx');
-var Ripple = require('./ripple.jsx');
-
-var RaisedButton = React.createClass({displayName: "RaisedButton",
-
-  mixins: [Classable],
-
-  propTypes: {
-    className: React.PropTypes.string,
-    icon: React.PropTypes.string.isRequired,
-    mini: React.PropTypes.bool,
-    onTouchTap: React.PropTypes.func,
-    secondary: React.PropTypes.bool
-  },
-
-  getInitialState: function() {
-    var zDepth = this.props.disabled ? 0 : 2;
-    return {
-      zDepth: zDepth,
-      initialZDepth: zDepth
-    };
-  },
-
-  render: function() {
-    var $__0=
-      
-      
-      
-      
-         this.props,className=$__0.className,icon=$__0.icon,mini=$__0.mini,onTouchTap=$__0.onTouchTap,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,icon:1,mini:1,onTouchTap:1}),
-      classes = this.getClasses('mui-floating-action-button', {
-        'mui-is-mini': this.props.mini,
-        'mui-is-secondary': this.props.secondary
-      });
-
-    return (
-      React.createElement(Paper, {className: classes, innerClassName: "mui-floating-action-button-inner", zDepth: this.state.zDepth, circle: true}, 
-        React.createElement(EnhancedButton, React.__spread({},  
-          other, 
-          {className: "mui-floating-action-button-container", 
-          onTouchTap: this._onTouchTap}), 
-
-          
-          React.createElement(Ripple, {className: "mui-floating-action-button-focus-ripple"}), 
-          React.createElement(Icon, {className: "mui-floating-action-button-icon", icon: this.props.icon})
-
-        ), 
-        React.createElement(Ripple, {ref: "ripple", className: "mui-floating-action-button-ripple"})
-      )
-    );
-  },
-
-  _onTouchTap: function(e) {
-    if (!this.props.disabled) this._animateButtonClick(e);
-    if (this.props.onTouchTap) this.props.onTouchTap(e);
-  },
-
-  _animateButtonClick: function(e) {
-    var el = this.getDOMNode();
-
-    //animate the ripple
-    this.refs.ripple.animateFromCenter();
-
-    //animate the zdepth change
-    this.setState({ zDepth: this.state.initialZDepth + 1 });
-    setTimeout(function() {
-      if (this.isMounted()) {
-        this.setState({zDepth: this.state.initialZDepth});
-      }
-    }.bind(this), 450);
-  }
-
-});
-
-module.exports = RaisedButton;
-},{"./enhanced-button.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\enhanced-button.jsx","./icon.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\icon.jsx","./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./paper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\paper.jsx","./ripple.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\ripple.jsx","./utils/css-event.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\css-event.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\icon-button.jsx":[function(require,module,exports){
-var React = require('react');
-var Classable = require('./mixins/classable.js');
-var EnhancedButton = require('./enhanced-button.jsx');
-var Icon = require('./icon.jsx');
-var Ripple = require('./ripple.jsx');
-var Tooltip = require('./tooltip.jsx');
-
-var IconButton = React.createClass({displayName: "IconButton",
-
-  mixins: [Classable],
-
-  propTypes: {
-    className: React.PropTypes.string,
-    disabled: React.PropTypes.bool,
-    icon: React.PropTypes.string.isRequired,
-    onBlur: React.PropTypes.func,
-    onFocus: React.PropTypes.func,
-    onTouchTap: React.PropTypes.func,
-    tooltip: React.PropTypes.string,
-    touch: React.PropTypes.bool
-  },
-
-  getInitialState: function() {
-    return {
-      tooltipShown: false 
-    };
-  },
-
-  componentDidMount: function() {
-    if (this.props.tooltip) {
-      this._positionTooltip();
-    }
-  },
-
-  render: function() {
-    var $__0=
-      
-      
-      
-      
-      
-      
-      
-         this.props,className=$__0.className,icon=$__0.icon,onBlur=$__0.onBlur,onFocus=$__0.onFocus,onTouchTap=$__0.onTouchTap,tooltip=$__0.tooltip,touch=$__0.touch,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,icon:1,onBlur:1,onFocus:1,onTouchTap:1,tooltip:1,touch:1});
-    var classes = this.getClasses('mui-icon-button');
-    var tooltip;
-
-    if (this.props.tooltip) {
-      tooltip = (
-        React.createElement(Tooltip, {
-          ref: "tooltip", 
-          className: "mui-icon-button-tooltip", 
-          label: this.props.tooltip, 
-          show: this.state.tooltipShown, 
-          touch: this.props.touch})
-      );
-    }
-
-    return (
-      React.createElement(EnhancedButton, React.__spread({},  other, 
-        {ref: "button", 
-        className: classes, 
-        onBlur: this._handleBlur, 
-        onFocus: this._handleFocus, 
-        onTouchTap: this._handleTouchTap}), 
-
-        tooltip, 
-        React.createElement("div", {
-          className: "mui-icon-button-target", 
-          onMouseOut: this._handleMouseOut, 
-          onMouseOver: this._handleMouseOver}, 
-
-          React.createElement(Ripple, {ref: "ripple", className: "mui-icon-button-ripple"}), 
-          React.createElement(Ripple, {className: "mui-icon-button-focus-ripple"}), 
-          React.createElement(Icon, {icon: icon})
-
-        )
-
-      )
-    );
-  },
-
-  _positionTooltip: function() {
-    var tooltip = this.refs.tooltip.getDOMNode();
-    var tooltipWidth = tooltip.offsetWidth;
-    var buttonWidth = 48;
-
-    tooltip.style.left = (tooltipWidth - buttonWidth) / 2 * -1 + 'px';
-  },
-
-  _showTooltip: function() {
-    if (!this.props.disabled) this.setState({ tooltipShown: true });
-  },
-
-  _hideTooltip: function() {
-    this.setState({ tooltipShown: false });
-  },
-
-  _handleBlur: function(e) {
-    this._hideTooltip();
-    if (this.props.onBlur) this.props.onBlur(e);
-  },
-
-  _handleFocus: function(e) {
-    this._showTooltip();
-    if (this.props.onFocus) this.props.onFocus(e);
-  },
-
-  _handleMouseOut: function(e) {
-    if (!this.refs.button.isKeyboardFocused()) this._hideTooltip();
-    if (this.props.onMouseOut) this.props.onMouseOut(e);
-  },
-
-  _handleMouseOver: function(e) {
-    this._showTooltip();
-    if (this.props.onMouseOver) this.props.onMouseOver(e);
-  },
-
-  _handleTouchTap: function(e) {
-    if (!this.props.disabled) this.refs.ripple.animateFromCenter();
-    if (this.props.onTouchTap) this.props.onTouchTap(e);
-  }
-
-});
-
-module.exports = IconButton;
-},{"./enhanced-button.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\enhanced-button.jsx","./icon.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\icon.jsx","./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./ripple.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\ripple.jsx","./tooltip.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\tooltip.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\icon.jsx":[function(require,module,exports){
-var React = require('react'),
-  Classable = require('./mixins/classable.js');
-
-var Icon = React.createClass({displayName: "Icon",
-
-  mixins: [Classable],
-
-  propTypes: {
-    icon: React.PropTypes.string
-  },
-
-  render: function() {
-    var $__0=      this.props,className=$__0.className,icon=$__0.icon,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,icon:1}),
-      isMuiCustomIcon = icon.indexOf('mui-icon') > -1,
-      mdfiClassName = 'mdfi_' + icon.replace(/-/g, '_'),
-      iconClassName = isMuiCustomIcon ? icon : mdfiClassName,
-      classes = this.getClasses('mui-icon ' + iconClassName);
-
-    return (
-      React.createElement("span", React.__spread({},  other, {className: classes}))
-    );
-  }
-
-});
-
-module.exports = Icon;
-},{"./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\input.jsx":[function(require,module,exports){
-/** @jsx React.DOM */
-
-var React = require('react');
-var Classable = require('./mixins/classable.js');
-var classSet = React.addons.classSet;
-
-var Input = React.createClass({displayName: "Input",
-
-  propTypes: {
-    multiline: React.PropTypes.bool,
-    required: React.PropTypes.bool,
-    inlinePlaceholder: React.PropTypes.bool,
-    rows: React.PropTypes.number,
-    min: React.PropTypes.number,
-    max: React.PropTypes.number,
-    step: React.PropTypes.number,
-    inputStyle: React.PropTypes.string,
-    error: React.PropTypes.string,
-    description: React.PropTypes.string,
-    placeholder: React.PropTypes.string,
-    type: React.PropTypes.string,
-    name: React.PropTypes.string.isRequired,
-    onChange: React.PropTypes.func
-  },
-
-  mixins: [Classable],
-
-  getInitialState: function() {
-    return {
-      value: this.props.defaultValue,
-      rows: this.props.rows
-    };
-  },
-
-  getDefaultProps: function() {
-    return {
-      multiline: false,
-      required: true,
-      type: "text"
-    };
-  },
-
-  setError: function(error) {
-    this.setProps({ error: error });
-  },
-
-  removeError: function() {
-    this.setProps({error: undefined});
-  },
-
-  render: function() {
-    var classes = this.getClasses('mui-input', {
-      'mui-floating': this.props.inputStyle === 'floating',
-      'mui-text': this.props.type === 'text',
-      'mui-error': this.props.error !== undefined && this.props.error !== null,
-      'mui-disabled': !!this.props.disabled,
-    }),
-    placeholder = this.props.inlinePlaceholder ? this.props.placeholder : "",
-    inputIsNotEmpty = Boolean(this.state.value),
-    inputClassName = classSet({
-      'mui-is-not-empty': inputIsNotEmpty
-    }),
-    textareaClassName = classSet({
-      'mui-input-textarea': true,
-      'mui-is-not-empty': inputIsNotEmpty
-    }),
-    inputElement = this.props.multiline ?
-      this.props.valueLink ?
-        React.createElement("textarea", React.__spread({},  this.props, {ref: "input", className: textareaClassName, placeholder: placeholder, 
-          rows: this.state.rows})) :
-        React.createElement("textarea", React.__spread({},  this.props, {ref: "input", value: this.state.value, className: textareaClassName, 
-          placeholder: placeholder, rows: this.state.rows, onChange: this._onTextAreaChange})) :
-        this.props.valueLink ?
-          React.createElement("input", React.__spread({},  this.props, {ref: "input", className: inputClassName, placeholder: placeholder})) :
-          React.createElement("input", React.__spread({},  this.props, {className: inputClassName, ref: "input", value: this.state.value, placeholder: placeholder, 
-            onChange: this._onInputChange}))
-    placeholderSpan = this.props.inlinePlaceholder ? null : React.createElement("span", {className: "mui-input-placeholder", 
-      onClick: this._onPlaceholderClick}, this.props.placeholder);
-
-    return (
-      React.createElement("div", {ref: this.props.ref, className: classes}, 
-        inputElement, 
-        placeholderSpan, 
-        React.createElement("span", {className: "mui-input-highlight"}), 
-        React.createElement("span", {className: "mui-input-bar"}), 
-        React.createElement("span", {className: "mui-input-description"}, this.props.description), 
-        React.createElement("span", {className: "mui-input-error"}, this.props.error)
-      )
-    );
-  },
-
-  getValue: function() {
-    return this.state.value;
-  },
-
-  setValue: function(txt) {
-    this.setState({value: txt});
-  },
-
-  clearValue: function() {
-    this.setValue("");
-  },
-
-  blur: function() {
-    if(this.isMounted()) this.refs.input.getDOMNode().blur();
-  },
-  
-  focus: function() {
-    if (this.isMounted()) this.refs.input.getDOMNode().focus();
-  },
-
-  _onInputChange: function(e) {
-    var value = e.target.value;
-    this.setState({value: value});
-    if (this.props.onChange) this.props.onChange(e, value);
-  },
-
-  _onPlaceholderClick: function(e) {
-    this.focus();
-  },
-
-  _onTextAreaChange: function(e) {
-    this._onInputChange(e);
-    this._onLineBreak(e);
-  },
-
-  _onLineBreak: function(e) {
-    var input = (e.target.value.slice(-1));
-
-    if(input.match(/\n/gm)) {
-      if(this.state.rows != 20) {
-        this.setState({ rows: ((this.state.rows) + 1)});
-      }
-    }
-  }
-
-});
-
-module.exports = Input;
-
-},{"./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\left-nav.jsx":[function(require,module,exports){
-var React = require('react'),
-  KeyCode = require('./utils/key-code.js'),
-  Classable = require('./mixins/classable.js'),
-  WindowListenable = require('./mixins/window-listenable.js'),
-  Overlay = require('./overlay.jsx'),
-  Paper = require('./paper.jsx'),
-  Menu = require('./menu.jsx');
-
-var LeftNav = React.createClass({displayName: "LeftNav",
-
-  mixins: [Classable, WindowListenable],
-
-  propTypes: {
-    docked: React.PropTypes.bool,
-    header: React.PropTypes.element,
-    onChange: React.PropTypes.func,
-    menuItems: React.PropTypes.array.isRequired,
-    selectedIndex: React.PropTypes.number
-  },
-
-  windowListeners: {
-    'keyup': '_onWindowKeyUp'
-  },
-
-  getDefaultProps: function() {
-    return {
-      docked: true
-    };
-  },
-
-  getInitialState: function() {
-    return {
-      open: this.props.docked
-    };
-  },
-
-  toggle: function() {
-    this.setState({ open: !this.state.open });
-    return this;
-  },
-
-  close: function() {
-    this.setState({ open: false });
-    return this;
-  },
-
-  open: function() {
-    this.setState({ open: true });
-    return this;
-  },
-
-  render: function() {
-    var classes = this.getClasses('mui-left-nav', {
-        'mui-closed': !this.state.open
-      }),
-      selectedIndex = this.props.selectedIndex,
-      overlay;
-
-    if (!this.props.docked) overlay = React.createElement(Overlay, {show: this.state.open, onTouchTap: this._onOverlayTouchTap});
-
-    return (
-      React.createElement("div", {className: classes}, 
-
-        overlay, 
-        React.createElement(Paper, {
-          ref: "clickAwayableElement", 
-          className: "mui-left-nav-menu", 
-          zDepth: 2, 
-          rounded: false}, 
-          
-          this.props.header, 
-          React.createElement(Menu, {
-            ref: "menuItems", 
-            zDepth: 0, 
-            menuItems: this.props.menuItems, 
-            selectedIndex: selectedIndex, 
-            onItemClick: this._onMenuItemClick})
-
-        )
-      )
-    );
-  },
-
-  _onMenuItemClick: function(e, key, payload) {
-    if (!this.props.docked) this.close();
-    if (this.props.onChange && this.props.selectedIndex !== key) {
-      this.props.onChange(e, key, payload);
-    }
-  },
-
-  _onOverlayTouchTap: function() {
-    this.close();
-  },
-
-  _onWindowKeyUp: function(e) {
-    if (e.keyCode == KeyCode.ESC &&
-        !this.props.docked &&
-        this.state.open) {
-      this.close();
-    }
-  }
-
-});
-
-module.exports = LeftNav;
-},{"./menu.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\menu.jsx","./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./mixins/window-listenable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\window-listenable.js","./overlay.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\overlay.jsx","./paper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\paper.jsx","./utils/key-code.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\key-code.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\menu-item.jsx":[function(require,module,exports){
-var React = require('react'),
-  Classable = require('./mixins/classable.js'),
-  Icon = require('./icon.jsx'),
-  Toggle = require('./toggle.jsx'),
-  Ripple = require('./ripple.jsx'),
-
-  Types = {
-    LINK: 'LINK',
-    SUBHEADER: 'SUBHEADER',
-    NESTED: 'NESTED'
-  };
-
-var MenuItem = React.createClass({displayName: "MenuItem",
-
-  mixins: [Classable],
-
-  propTypes: {
-    index: React.PropTypes.number.isRequired,
-    icon: React.PropTypes.string,
-    iconRight: React.PropTypes.string,
-    attribute: React.PropTypes.string,
-    number: React.PropTypes.string,
-    data: React.PropTypes.string,
-    toggle: React.PropTypes.bool,
-    onClick: React.PropTypes.func,
-    onToggle: React.PropTypes.func,
-    selected: React.PropTypes.bool
-  },
-
-  statics: {
-    Types: Types
-  },
-
-  getDefaultProps: function() {
-    return {
-      toggle: false
-    };
-  },
-
-  render: function() {
-    var classes = this.getClasses('mui-menu-item', {
-        'mui-selected': this.props.selected
-      }),
-      icon,
-      data,
-      iconRight,
-      attribute,
-      number,
-      toggle;
-
-    if (this.props.icon) icon = React.createElement(Icon, {className: "mui-menu-item-icon", icon: this.props.icon});
-    if (this.props.data) data = React.createElement("span", {className: "mui-menu-item-data"}, this.props.data);
-    if (this.props.iconRight) iconRight = React.createElement(Icon, {className: "mui-menu-item-icon-right", icon: this.props.iconRight});
-    if (this.props.number !== undefined) number = React.createElement("span", {className: "mui-menu-item-number"}, this.props.number);
-    if (this.props.attribute !== undefined) attribute = React.createElement("span", {className: "mui-menu-item-attribute"}, this.props.attribute);
-    if (this.props.toggle) toggle = React.createElement(Toggle, {onToggle: this._onToggleClick});
-
-    return (
-      React.createElement("div", {key: this.props.index, className: classes, onMouseDown: this._onClick}, 
-        React.createElement(Ripple, {ref: "ripple"}), 
-        icon, 
-        this.props.children, 
-        data, 
-        attribute, 
-        number, 
-        toggle, 
-        iconRight
-      )
-    );
-  },
-
-  _onClick: function(e) {
-    var _this = this;
-
-    //animate the ripple
-    // this.refs.ripple.animate(e, function() {
-      if (_this.props.onClick) _this.props.onClick(e, _this.props.index);
-    // });
-  },
-
-  _onToggleClick: function(e, toggled) {
-    if (this.props.onToggle) this.props.onToggle(e, this.props.index, toggled);
-  }
-
-});
-
-module.exports = MenuItem;
-
-},{"./icon.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\icon.jsx","./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./ripple.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\ripple.jsx","./toggle.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\toggle.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\menu.jsx":[function(require,module,exports){
-var React = require('react'),
-  CssEvent = require('./utils/css-event.js'),
-  Dom = require('./utils/dom.js'),
-  KeyLine = require('./utils/key-line.js'),
-  Classable = require('./mixins/classable.js'),
-  ClickAwayable = require('./mixins/click-awayable'),
-  Paper = require('./paper.jsx'),
-  MenuItem = require('./menu-item.jsx');
-
-/***********************
- * Nested Menu Component
- ***********************/
-var NestedMenuItem = React.createClass({displayName: "NestedMenuItem",
-
-  mixins: [Classable, ClickAwayable],
-
-  propTypes: {
-    index: React.PropTypes.number.isRequired,
-    text: React.PropTypes.string,
-    menuItems: React.PropTypes.array.isRequired,
-    zDepth: React.PropTypes.number,
-    onItemClick: React.PropTypes.func
-  },
-
-  getInitialState: function() {
-    return { open: false }
-  },
-
-  componentClickAway: function() {
-    this.setState({ open: false });
-  },
-
-  componentDidMount: function() {
-    this._positionNestedMenu();
-  },
-
-  componentDidUpdate: function(prevProps, prevState) {
-    this._positionNestedMenu();
-  },
-
-  render: function() {
-    var classes = this.getClasses('mui-nested-menu-item', {
-      'mui-open': this.state.open
-    });
-
-    return (
-      React.createElement("div", {className: classes}, 
-        React.createElement(MenuItem, {index: this.props.index, iconRight: "mui-icon-arrow-drop-right", onClick: this._onParentItemClick}, 
-          this.props.text
-        ), 
-        React.createElement(Menu, {
-          ref: "nestedMenu", 
-          menuItems: this.props.menuItems, 
-          onItemClick: this._onMenuItemClick, 
-          hideable: true, 
-          visible: this.state.open, 
-          zDepth: this.props.zDepth + 1})
-      )
-    );
-  },
-
-  _positionNestedMenu: function() {
-    var el = this.getDOMNode(),
-      nestedMenu = this.refs.nestedMenu.getDOMNode();
-
-    nestedMenu.style.left = el.offsetWidth + 'px';
-  },
-
-  _onParentItemClick: function() {
-    this.setState({ open: !this.state.open });
-  },
-
-  _onMenuItemClick: function(e, index, menuItem) {
-    this.setState({ open: false });
-    if (this.props.onItemClick) this.props.onItemClick(e, index, menuItem);
-  }
-
-});
-
-/****************
- * Menu Component
- ****************/
-var Menu = React.createClass({displayName: "Menu",
-
-  mixins: [Classable],
-
-  propTypes: {
-    autoWidth: React.PropTypes.bool,
-    onItemClick: React.PropTypes.func,
-    onToggleClick: React.PropTypes.func,
-    menuItems: React.PropTypes.array.isRequired,
-    selectedIndex: React.PropTypes.number,
-    hideable: React.PropTypes.bool,
-    visible: React.PropTypes.bool,
-    zDepth: React.PropTypes.number
-  },
-
-  getInitialState: function() {
-    return { nestedMenuShown: false }
-  },
-
-  getDefaultProps: function() {
-    return {
-      autoWidth: true,
-      hideable: false,
-      visible: true,
-      zDepth: 1
-    };
-  },
-
-  componentDidMount: function() {
-    var el = this.getDOMNode();
-
-    //Set the menu with
-    this._setKeyWidth(el);
-
-    //Save the initial menu height for later
-    this._initialMenuHeight = el.offsetHeight + KeyLine.Desktop.GUTTER_LESS;
-
-    //Show or Hide the menu according to visibility
-    this._renderVisibility();
-  },
-
-  componentDidUpdate: function(prevProps, prevState) {
-    if (this.props.visible !== prevProps.visible) this._renderVisibility();
-  },
-
-  render: function() {
-    var classes = this.getClasses('mui-menu', {
-      'mui-menu-hideable': this.props.hideable,
-      'mui-visible': this.props.visible
-    });
-
-    return (
-      React.createElement(Paper, {ref: "paperContainer", zDepth: this.props.zDepth, className: classes}, 
-        this._getChildren()
-      )
-    );
-  },
-
-  _getChildren: function() {
-    var children = [],
-      menuItem,
-      itemComponent,
-      isSelected;
-
-    //This array is used to keep track of all nested menu refs
-    this._nestedChildren = [];
-
-    for (var i=0; i < this.props.menuItems.length; i++) {
-      menuItem = this.props.menuItems[i];
-      isSelected = i === this.props.selectedIndex;
-
-      switch (menuItem.type) {
-
-        case MenuItem.Types.LINK:
-          itemComponent = (
-            React.createElement("a", {key: i, index: i, className: "mui-menu-item", href: menuItem.payload}, menuItem.text)
-          );
-        break;
-
-        case MenuItem.Types.SUBHEADER:
-          itemComponent = (
-            React.createElement("div", {key: i, index: i, className: "mui-subheader"}, menuItem.text)
-          );
-          break;
-
-        case MenuItem.Types.NESTED:
-          itemComponent = (
-            React.createElement(NestedMenuItem, {
-              ref: i, 
-              key: i, 
-              index: i, 
-              text: menuItem.text, 
-              menuItems: menuItem.items, 
-              zDepth: this.props.zDepth, 
-              onItemClick: this._onNestedItemClick})
-          );
-          this._nestedChildren.push(i);
-          break;
-
-        default:
-          itemComponent = (
-            React.createElement(MenuItem, {
-              selected: isSelected, 
-              key: i, 
-              index: i, 
-              icon: menuItem.icon, 
-              data: menuItem.data, 
-              attribute: menuItem.attribute, 
-              number: menuItem.number, 
-              toggle: menuItem.toggle, 
-              onClick: this._onItemClick, 
-              onToggle: this._onItemToggle}, 
-              menuItem.text
-            )
-          );
-      }
-      children.push(itemComponent);
-    }
-
-    return children;
-  },
-
-  _setKeyWidth: function(el) {
-    var menuWidth = this.props.autoWidth ?
-      KeyLine.getIncrementalDim(el.offsetWidth) + 'px' :
-      '100%';
-
-    //Update the menu width
-    Dom.withoutTransition(el, function() {
-      el.style.width = menuWidth;
-    });
-  },
-
-  _renderVisibility: function() {
-    var el;
-
-    if (this.props.hideable) {
-      el = this.getDOMNode();
-      var innerContainer = this.refs.paperContainer.getInnerContainer().getDOMNode();
-      
-      if (this.props.visible) {
-
-        //Open the menu
-        el.style.height = this._initialMenuHeight + 'px';
-
-        //Set the overflow to visible after the animation is done so
-        //that other nested menus can be shown
-        CssEvent.onTransitionEnd(el, function() {
-          //Make sure the menu is open before setting the overflow.
-          //This is to accout for fast clicks
-          if (this.props.visible) innerContainer.style.overflow = 'visible';
-        }.bind(this));
-
-      } else {
-
-        //Close the menu
-        el.style.height = '0px';
-
-        //Set the overflow to hidden so that animation works properly
-        innerContainer.style.overflow = 'hidden';
-      }
-    }
-  },
-
-  _onNestedItemClick: function(e, index, menuItem) {
-    if (this.props.onItemClick) this.props.onItemClick(e, index, menuItem);
-  },
-
-  _onItemClick: function(e, index) {
-    if (this.props.onItemClick) this.props.onItemClick(e, index, this.props.menuItems[index]);
-  },
-
-  _onItemToggle: function(e, index, toggled) {
-    if (this.props.onItemToggle) this.props.onItemToggle(e, index, this.props.menuItems[index], toggled);
-  }
-
-});
-
-module.exports = Menu;
-},{"./menu-item.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\menu-item.jsx","./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./mixins/click-awayable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\click-awayable.js","./paper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\paper.jsx","./utils/css-event.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\css-event.js","./utils/dom.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\dom.js","./utils/key-line.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\key-line.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js":[function(require,module,exports){
-var React = require('react/addons'),
-  classSet = React.addons.classSet;
-
-module.exports = {
-
-  propTypes: {
-    className: React.PropTypes.string
-  },
-
-  getClasses: function(initialClasses, additionalClassObj) {
-    var classString = '';
-
-    //Initialize the classString with the classNames that were passed in
-    if (this.props.className) classString += ' ' + this.props.className;
-
-    //Add in initial classes
-    if (typeof initialClasses === 'object') {
-      classString += ' ' + classSet(initialClasses);
-    } else {
-      classString += ' ' + initialClasses;
-    }
-
-    //Add in additional classes
-    if (additionalClassObj) classString += ' ' + classSet(additionalClassObj);
-
-    //Convert the class string into an object and run it through the class set
-    return classSet(this.getClassSet(classString));
-  },
-
-  getClassSet: function(classString) {
-    var classObj = {};
-
-    if (classString) {
-      classString.split(' ').forEach(function(className) {
-        if (className) classObj[className] = true;
-      });
-    }
-
-    return classObj;
-  }
-
-}
-
-},{"react/addons":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\addons.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\click-awayable.js":[function(require,module,exports){
-var Events = require('../utils/events.js'),
-  Dom = require('../utils/dom.js');
-
-module.exports = {
-
-  //When the component mounts, listen to click events and check if we need to
-  //Call the componentClickAway function.
-  componentDidMount: function() {
-    Events.on(document, 'click', this._checkClickAway);
-  },
-
-  componentWillUnmount: function() {
-    Events.off(document, 'click', this._checkClickAway);
-  },
-
-  _checkClickAway: function(e) {
-    var el = this.getDOMNode();
-
-    // Check if the target is inside the current component
-    if (this.isMounted() && 
-      e.target != el &&
-      !Dom.isDescendant(el, e.target)) {
-      if (this.componentClickAway) this.componentClickAway();
-    }
-  }
-
-}
-},{"../utils/dom.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\dom.js","../utils/events.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\events.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\window-listenable.js":[function(require,module,exports){
-var Events = require('../utils/events.js');
-
-module.exports = {
-
-  componentDidMount: function() {
-    var listeners = this.windowListeners;
-
-    for (var eventName in listeners) {
-       var callbackName = listeners[eventName];
-       Events.on(window, eventName, this[callbackName]);
-    }
-  },
-
-  componentWillUnmount: function() {
-    var listeners = this.windowListeners;
-
-    for (var eventName in listeners) {
-       var callbackName = listeners[eventName];
-       Events.off(window, eventName, this[callbackName]);
-    }
-  }
-  
-}
-},{"../utils/events.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\events.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\overlay.jsx":[function(require,module,exports){
-var React = require('react'),
-  Classable = require('./mixins/classable.js');
-
-var Overlay = React.createClass({displayName: "Overlay",
-
-  mixins: [Classable],
-
-  propTypes: {
-    show: React.PropTypes.bool
-  },
-
-  render: function() {
-    var 
-      $__0=
-        
-        
-        this.props,className=$__0.className,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1}),
-      classes = this.getClasses('mui-overlay', {
-        'mui-is-shown': this.props.show
-      });
-
-    return (
-      React.createElement("div", React.__spread({},  other, {className: classes}))
-    );
-  }
-
-});
-
-module.exports = Overlay;
-},{"./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\paper.jsx":[function(require,module,exports){
-var React = require('react'),
-  Classable = require('./mixins/classable.js');
-
-var Paper = React.createClass({displayName: "Paper",
-
-  mixins: [Classable],
-
-  propTypes: {
-    circle: React.PropTypes.bool,
-    innerClassName: React.PropTypes.string,
-    rounded: React.PropTypes.bool,
-    zDepth: React.PropTypes.oneOf([0,1,2,3,4,5])
-  },
-
-  getDefaultProps: function() {
-    return {
-      innerClassName: '',
-      rounded: true,
-      zDepth: 1
-    };
-  },
-
-  render: function() {
-    var $__0=
-      
-      
-      
-      
-      
-         this.props,className=$__0.className,circle=$__0.circle,innerClassName=$__0.innerClassName,rounded=$__0.rounded,zDepth=$__0.zDepth,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,circle:1,innerClassName:1,rounded:1,zDepth:1}),
-      classes = this.getClasses(
-        'mui-paper ' +
-        'mui-z-depth-' + this.props.zDepth, { 
-        'mui-rounded': this.props.rounded,
-        'mui-circle': this.props.circle
-      }),
-      insideClasses = 
-        this.props.innerClassName + ' ' +
-        'mui-paper-container ' +
-        'mui-z-depth-bottom';
-
-    return (
-      React.createElement("div", React.__spread({},  other, {className: classes}), 
-        React.createElement("div", {ref: "innerContainer", className: insideClasses}, 
-          this.props.children
-        )
-      )
-    );
-  },
-
-  getInnerContainer: function() {
-    return this.refs.innerContainer;
-  }
-
-});
-
-module.exports = Paper;
-},{"./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\radio-button.jsx":[function(require,module,exports){
-var React = require('react'),
-    Paper = require('./paper.jsx'),
-    Classable = require('./mixins/classable.js');
-
-var RadioButton = React.createClass({displayName: "RadioButton",
-
-  mixins: [Classable],
-
-  propTypes: {
-    label: React.PropTypes.string,
-    name: React.PropTypes.string,
-    onClick: React.PropTypes.func,
-    value: React.PropTypes.string,
-    defaultChecked: React.PropTypes.bool
-  },
-  getDefaultProps: function(){
-    return {
-       defaultChecked: false
-    }
-  },
-  getInitialState: function() {
-    return {
-      checked: this.props.defaultChecked
-    }
-  },
-
-  toggle: function() {
-    var radioButton = this.refs.radioButton.getDOMNode();
-
-    this.setState({ checked: !this.state.checked });
-    radioButton.checked = !radioButton.checked;
-  },
-
-  render: function() {
-    var classes = this.getClasses('mui-radio-button');
-
-    return (
-      React.createElement("div", {className: classes, onClick: this._onClick}, 
-        React.createElement("div", {className: "mui-radio-button-target"}, 
-          React.createElement("input", {
-            ref: "radioButton", 
-            type: "radio", 
-            name: this.props.name, 
-            value: this.props.value, 
-            defaultChecked: this.props.defaultChecked}
-          ), 
-          React.createElement("div", {className: "mui-radio-button-fill"})
-          ), 
-        React.createElement("span", {className: "mui-radio-button-label"}, this.props.label)
-      )
-    );
-  },
-
-  _onClick: function(e) {
-    var checkedState = this.state.checked;
-
-    this.toggle();
-    if (this.props.onClick) this.props.onClick(e, !checkedState);
-  }
-
-});
-
-module.exports = RadioButton;
-
-},{"./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./paper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\paper.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\raised-button.jsx":[function(require,module,exports){
-var React = require('react');
-var CssEvent = require('./utils/css-event.js');
-var Classable = require('./mixins/classable.js');
-var EnhancedButton = require('./enhanced-button.jsx');
-var Paper = require('./paper.jsx');
-var Ripple = require('./ripple.jsx');
-
-var RaisedButton = React.createClass({displayName: "RaisedButton",
-
-  mixins: [Classable],
-
-  propTypes: {
-    className: React.PropTypes.string,
-    label: React.PropTypes.string.isRequired,
-    onTouchTap: React.PropTypes.func,
-    primary: React.PropTypes.bool,
-    secondary: React.PropTypes.bool
-  },
-
-  getInitialState: function() {
-    var zDepth = this.props.disabled ? 0 : 1;
-    return {
-      zDepth: zDepth,
-      initialZDepth: zDepth
-    };
-  },
-
-  render: function() {
-    var $__0=
-      
-      
-         this.props,className=$__0.className,onTouchTap=$__0.onTouchTap,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,onTouchTap:1}),
-      classes = this.getClasses('mui-raised-button', {
-        'mui-is-primary': this.props.primary,
-        'mui-is-secondary': !this.props.primary && this.props.secondary
-      });
-
-    return (
-      React.createElement(Paper, {className: classes, zDepth: this.state.zDepth}, 
-        React.createElement(EnhancedButton, React.__spread({},  
-          other, 
-          {className: "mui-raised-button-container", 
-          onTouchTap: this._onTouchTap}), 
-
-          React.createElement(Ripple, {ref: "ripple", className: "mui-raised-button-ripple"}), 
-          React.createElement(Ripple, {className: "mui-raised-button-focus-ripple"}), 
-          React.createElement("span", {className: "mui-raised-button-label"}, this.props.label)
-
-        )
-      )
-    );
-  },
-
-  _onTouchTap: function(e) {
-    if (!this.props.disabled) this._animateButtonClick(e);
-    if (this.props.onTouchTap) this.props.onTouchTap(e);
-  },
-
-  _animateButtonClick: function(e) {
-    var el = this.getDOMNode();
-
-    //animate the ripple
-    this.refs.ripple.animate(e);
-
-    //animate the zdepth change
-    this.setState({ zDepth: this.state.initialZDepth + 1 });
-    setTimeout(function() {
-      this.setState({ zDepth: this.state.initialZDepth });
-    }.bind(this), 450);
-  }
-
-});
-
-module.exports = RaisedButton;
-},{"./enhanced-button.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\enhanced-button.jsx","./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./paper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\paper.jsx","./ripple.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\ripple.jsx","./utils/css-event.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\css-event.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\ripple.jsx":[function(require,module,exports){
-var React = require('react'),
-  CssEvent = require('./utils/css-event.js'),
-  Dom = require('./utils/dom.js'),
-  Classable = require('./mixins/classable.js');
-
-var Ripple = React.createClass({displayName: "Ripple",
-
-  mixins: [Classable],
-
-  render: function() {
-    var classes = this.getClasses('mui-ripple');
-
-    return (
-      React.createElement("div", {className: classes})
-    );
-  },
-
-  animate: function(e, callback) {
-    var el = this.getDOMNode(),
-      offset = Dom.offset(el.parentNode),
-      pageX = e.pageX == undefined ? e.nativeEvent.pageX : e.pageX,
-      pageY = e.pageY == undefined ? e.nativeEvent.pageY : e.pageY,
-      x = pageX - offset.left,
-      y = pageY - offset.top;
-
-    this._animateRipple(el, x, y, callback);
-  },
-
-  animateFromCenter: function(callback) {
-    var el = this.getDOMNode(),
-      x = el.parentNode.offsetWidth / 2,
-      y = el.parentNode.offsetHeight / 2;
-
-    this._animateRipple(el, x, y, callback);
-  },
-
-  _animateRipple: function(el, x, y, callback) {
-    el.style.transition = 'none';
-    el.style.top = y + 'px';
-    el.style.left = x + 'px';
-
-    Dom.addClass(el, 'mui-is-visible');
-
-    CssEvent.onAnimationEnd(el, function() {
-      Dom.removeClass(el, 'mui-is-visible');
-      if (callback) callback();
-    });
-  }
-
-});
-
-module.exports = Ripple;
-},{"./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./utils/css-event.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\css-event.js","./utils/dom.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\dom.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\slider.jsx":[function(require,module,exports){
-
-var React = require('react'),
-    Paper = require('./paper.jsx'),
-    Classable = require('./mixins/classable.js'),
-    Draggable = require('react-draggable2');
-
-var Slider = React.createClass({displayName: "Slider",
-
-  propTypes: {
-    required: React.PropTypes.bool,
-    disabled: React.PropTypes.bool,
-    min: React.PropTypes.number,
-    max: React.PropTypes.number,
-    step: React.PropTypes.number,
-    error: React.PropTypes.string,
-    description: React.PropTypes.string,
-    name: React.PropTypes.string.isRequired,
-    onChange: React.PropTypes.func
-  },
-
-  mixins: [Classable],
-
-  getDefaultProps: function() {
-    return {
-      required: true,
-      disabled: false,
-      defaultValue: 0,
-      min: 0,
-      max: 1,
-      dragging: false
-    };
-  },
-
-  getInitialState: function() {
-    var value = this.props.value;
-    if (value == null) value = this.props.defaultValue;
-    var percent = value / this.props.max;
-    if (isNaN(percent)) percent = 0;
-    return {
-      value: value,
-      percent: percent
-    }
-  },
-
-  componentWillReceiveProps: function(nextProps) {
-    if (nextProps.value != null) {
-      this.setValue(nextProps.value);
-    }
-  },
-
-  render: function() {
-    var classes = this.getClasses('mui-input', {
-      'mui-error': this.props.error != null
-    });
-
-    var sliderClasses = this.getClasses('mui-slider', {
-      'mui-slider-zero': this.state.percent == 0,
-      'mui-disabled': this.props.disabled
-    });
-
-    var percent = this.state.percent;
-    if (percent > 1) percent = 1; else if (percent < 0) percent = 0;
-
-    return (
-      React.createElement("div", {className: classes}, 
-        React.createElement("span", {className: "mui-input-highlight"}), 
-        React.createElement("span", {className: "mui-input-bar"}), 
-        React.createElement("span", {className: "mui-input-description"}, this.props.description), 
-        React.createElement("span", {className: "mui-input-error"}, this.props.error), 
-        React.createElement("div", {className: sliderClasses, onClick: this._onClick}, 
-          React.createElement("div", {ref: "track", className: "mui-slider-track"}, 
-            React.createElement(Draggable, {axis: "x", bound: "point", 
-              cancel: this.props.disabled ? '*' : null, 
-              start: {x: (percent * 100) + '%'}, 
-              onStart: this._onDragStart, 
-              onStop: this._onDragStop, 
-              onDrag: this._onDragUpdate}, 
-              React.createElement("div", {className: "mui-slider-handle", tabIndex: 0})
-            ), 
-            React.createElement("div", {className: "mui-slider-selection mui-slider-selection-low", 
-              style: {width: (percent * 100) + '%'}}, 
-              React.createElement("div", {className: "mui-slider-selection-fill"})
-            ), 
-            React.createElement("div", {className: "mui-slider-selection mui-slider-selection-high", 
-              style: {width: ((1 - percent) * 100) + '%'}}, 
-              React.createElement("div", {className: "mui-slider-selection-fill"})
-            )
-          )
-        ), 
-        React.createElement("input", {ref: "input", type: "hidden", 
-          name: this.props.name, 
-          value: this.state.value, 
-          required: this.props.required, 
-          min: this.props.min, 
-          max: this.props.max, 
-          step: this.props.step})
-      )
-    );
-  },
-
-  getValue: function() {
-    return this.state.value;
-  },
-
-  setValue: function(i) {
-    // calculate percentage
-    var percent = (i - this.props.min) / (this.props.max - this.props.min);
-    if (isNaN(percent)) percent = 0;
-    // update state
-    this.setState({
-      value: i,
-      percent: percent
-    });
-  },
-
-  getPercent: function() {
-    return this.state.percent;
-  },
-
-  setPercent: function (percent) {
-    var value = this._percentToValue(percent);
-    this.setState({value: value, percent: percent});
-  },
-
-  clearValue: function() {
-    this.setValue(0);
-  },
-
-  _onClick: function (e) {
-    // let draggable handle the slider
-    if (this.state.dragging || this.props.disabled) return;
-    var value = this.state.value;
-    var node = this.refs.track.getDOMNode();
-    var boundingClientRect = node.getBoundingClientRect();
-    var offset = e.clientX - boundingClientRect.left;
-    this._updateWithChangeEvent(e, offset / node.clientWidth);
-  },
-
-  _onDragStart: function(e, ui) {
-    this.setState({
-      dragging: true
-    });
-  },
-
-  _onDragStop: function(e, ui) {
-    this.setState({
-      dragging: false
-    });
-  },
-
-  _onDragUpdate: function(e, ui) {
-    if (!this.state.dragging) return;
-    if (!this.props.disabled) this._dragX(e, ui.position.left);
-  },
-
-  _dragX: function(e, pos) {
-    var max = this.refs.track.getDOMNode().clientWidth;
-    if (pos < 0) pos = 0; else if (pos > max) pos = max;
-    this._updateWithChangeEvent(e, pos / max);
-  },
-
-  _updateWithChangeEvent: function(e, percent) {
-    if (this.state.percent === percent) return;
-    this.setPercent(percent);
-    var value = this._percentToValue(percent);
-    if (this.props.onChange) this.props.onChange(e, value);
-  },
-
-  _percentToValue: function(percent) {
-    return percent * (this.props.max - this.props.min) + this.props.min;
-  }
-
-});
-
-module.exports = Slider;
-
-},{"./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./paper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\paper.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react-draggable2":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\node_modules\\react-draggable2\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\toast.jsx":[function(require,module,exports){
-var React = require('react');
-var Classable = require('./mixins/classable.js');
-var ClickAwayable = require('./mixins/click-awayable.js');
-
-var Toast = React.createClass({displayName: "Toast",
-
-  mixins: [Classable, ClickAwayable],
-
-  propTypes: {
-    action: React.PropTypes.string,
-    icon: React.PropTypes.string,
-    message: React.PropTypes.string,
-    onClick: React.PropTypes.func,
-    open: React.PropTypes.bool
-  },
-
-  getInitialState: function() {
-    return {
-      open: false
-    }
-  },
-
-  componentWillReceiveProps: function(nextProps) {
-    this.setState({ open: nextProps.open });
-  },
-
-  componentClickAway: function() {
-    this.setState({ open: false });
-  },
-
-  render: function() {
-    var classes = this.getClasses('mui-toast', {
-        'mui-open': this.state.open
-      }),
-      message,
-      action;
-
-    if (this.props.message)
-      message = React.createElement("span", {className: "mui-toast-message"}, this.props.message);
-    if (this.props.action)
-      action = React.createElement("span", {className: "mui-toast-action", onClick: this._onActionClick}, this.props.action);
-
-    return (
-      React.createElement("span", {className: classes}, 
-        message, 
-        action
-      )
-    );
-  },
-
-  _onActionClick: function(e) {
-    if (this.props.onClick) this.props.onClick(e, this.props.action);
-    this.setState({ open: false });
-  }
-  
-});
-
-module.exports = Toast;
-},{"./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./mixins/click-awayable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\click-awayable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\toggle.jsx":[function(require,module,exports){
-var React = require('react'),
-    Classable = require('./mixins/classable.js'),
-    Paper = require('./paper.jsx');
-
-var Toggle = React.createClass({displayName: "Toggle",
-
-  propTypes: {
-    onToggle: React.PropTypes.func,
-    toggled: React.PropTypes.bool
-  },
-
-  mixins: [Classable],
-
-  getInitialState: function() {
-    return {
-      toggled: this.props.toggled
-    }
-  },
-
-  render: function() {
-    var classes = this.getClasses('mui-toggle', {
-      'mui-is-toggled': this.state.toggled
-    })
-
-    return (
-      React.createElement("div", {className: classes, onTouchTap: this._handleTouchTap}, 
-        React.createElement("div", {className: "mui-toggle-track"}), 
-        React.createElement(Paper, {className: "mui-toggle-thumb", zDepth: 1})
-      )
-    );
-  },
-
-  _handleTouchTap: function(e) {
-    var toggledState = !this.state.toggled;
-
-    this.setState({ toggled: toggledState });
-
-    if (this.props.onToggle) this.props.onToggle(e, toggledState);
-  }
-
-});
-
-module.exports = Toggle;
-},{"./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./paper.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\paper.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\toolbar-group.jsx":[function(require,module,exports){
-/** @jsx React.DOM */
-
-var Classable = require('./mixins/classable.js');
-var React = require('react');
-
-var ToolbarGroup = React.createClass({displayName: "ToolbarGroup",
-
-  propTypes: {
-    float: React.PropTypes.string
-  },
-
-  mixins: [Classable],
-
-  render: function() {
-
-    var classes = this.getClasses('mui-toolbar-group', {
-      'mui-left': this.props.float === 'left',
-      'mui-right': this.props.float === 'right'
-    });
-
-    return (
-      React.createElement("div", {className: classes}, 
-        this.props.children
-      )
-    );
-  }
-
-});
-
-module.exports = ToolbarGroup;
-
-},{"./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\toolbar.jsx":[function(require,module,exports){
-/** @jsx React.DOM */
-
-var Classable = require('./mixins/classable.js');
-var React = require('react');
-
-var Toolbar = React.createClass({displayName: "Toolbar",
-
-  mixins: [Classable],
-
-  render: function() {
-    var classes = this.getClasses('mui-toolbar', {
-    });
-
-    return (
-      React.createElement("div", {className: classes}, 
-        this.props.children
-      )
-    );
-  }
-
-});
-
-module.exports = Toolbar;
-
-},{"./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\tooltip.jsx":[function(require,module,exports){
-var React = require('react');
-var Classable = require('./mixins/classable.js');
-var Ripple = require('./ripple.jsx');
-
-var Tooltip = React.createClass({displayName: "Tooltip",
-
-  mixins: [Classable],
-
-  propTypes: {
-    className: React.PropTypes.string,
-    label: React.PropTypes.string.isRequired,
-    show: React.PropTypes.bool,
-    touch: React.PropTypes.bool
-  },
-
-  componentDidMount: function() {
-    this._setRippleSize();
-  },
-
-  componentDidUpdate: function(prevProps, prevState) {
-    this._setRippleSize();
-  },
-
-  render: function() {
-    var $__0=
-      
-      
-         this.props,className=$__0.className,label=$__0.label,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,label:1});
-    var classes = this.getClasses('mui-tooltip', {
-      'mui-is-shown': this.props.show,
-      'mui-is-touch': this.props.touch
-    });
-
-    return (
-      React.createElement("div", React.__spread({},  other, {className: classes}), 
-        React.createElement("div", {ref: "ripple", className: "mui-tooltip-ripple"}), 
-        React.createElement("span", {className: "mui-tooltip-label"}, this.props.label)
-      )
-    );
-  },
-
-  _setRippleSize: function() {
-    var ripple = this.refs.ripple.getDOMNode();
-    var tooltipSize = this.getDOMNode().offsetWidth;
-    var ripplePadding = this.props.touch ? 45 : 20;
-    var rippleSize = tooltipSize + ripplePadding + 'px';
-
-    if (this.props.show) {
-      ripple.style.height = rippleSize;
-      ripple.style.width = rippleSize;
-    } else {
-      ripple.style.width = '0px';
-      ripple.style.height = '0px';
-    }
-  }
-
-});
-
-module.exports = Tooltip;
-},{"./mixins/classable.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","./ripple.jsx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\ripple.jsx","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\transitions\\slide-in.jsx":[function(require,module,exports){
-var React = require('react');
-var ReactCSSTransitionGroup = React.addons.CSSTransitionGroup;
-var Classable = require('../mixins/classable');
-
-var SlideIn = React.createClass({displayName: "SlideIn",
-
-  mixins: [Classable],
-
-  propTypes: {
-    direction: React.PropTypes.oneOf(['left', 'right', 'up', 'down'])
-  },
-
-  getDefaultProps: function() {
-    return {
-      direction: 'left'
-    };
-  },
-
-  render: function() {
-    var $__0=
-      
-      
-      
-      this.props,className=$__0.className,direction=$__0.direction,other=(function(source, exclusion) {var rest = {};var hasOwn = Object.prototype.hasOwnProperty;if (source == null) {throw new TypeError();}for (var key in source) {if (hasOwn.call(source, key) && !hasOwn.call(exclusion, key)) {rest[key] = source[key];}}return rest;})($__0,{className:1,direction:1});
-    var classes = this.getClasses('mui-transition-slide-in');
-
-    classes += ' mui-is-' + this.props.direction;
-
-    //Add a custom className to every child
-    React.Children.forEach(this.props.children, function(child) {
-      child.props.className = child.props.className ?
-        child.props.className + ' mui-transition-slide-in-child':
-        'mui-transition-slide-in-child';
-    });
-
-    return (
-      React.createElement(ReactCSSTransitionGroup, React.__spread({},  other, 
-        {className: classes, 
-        transitionName: "mui-transition-slide-in", 
-        component: "div"}), 
-        this.props.children
-      )
-    );
-  }
-
-});
-
-module.exports = SlideIn;
-},{"../mixins/classable":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\mixins\\classable.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\css-event.js":[function(require,module,exports){
-var Events = require('./events.js');
-
-module.exports = {
-
-  _testSupportedProps: function(props) {
-    var i,
-      undefined,
-      el = document.createElement('div');
-
-    for (i in props) {
-      if (props.hasOwnProperty(i) && el.style[i] !== undefined) {
-        return props[i];
-      }
-    }
-  },
-
-  //Returns the correct event name to use
-  transitionEndEventName: function() {
-    return this._testSupportedProps({
-      'transition':'transitionend',
-      'OTransition':'otransitionend',  
-      'MozTransition':'transitionend',
-      'WebkitTransition':'webkitTransitionEnd'
-    });
-  },
-
-  animationEndEventName: function() {
-    return this._testSupportedProps({
-      'animation': 'animationend',
-      '-o-animation': 'oAnimationEnd',
-      '-moz-animation': 'animationend',
-      '-webkit-animation': 'webkitAnimationEnd'
-    });
-  },
-
-  onTransitionEnd: function (el, callback) {
-    var transitionEnd = this.transitionEndEventName();
-
-    Events.once(el, transitionEnd, function() {
-      return callback();
-    });
-  },
-
-  onAnimationEnd: function (el, callback) {
-    var animationEnd = this.animationEndEventName();
-
-    Events.once(el, animationEnd, function() {
-      return callback();
-    });
-  }
-
-};
-},{"./events.js":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\events.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\date-time.js":[function(require,module,exports){
-module.exports = {
-
-  addDays: function(d, days) {
-    var newDate = this.clone(d);
-    newDate.setDate(d.getDate() + days);
-    return newDate;
-  },
-
-  addMonths: function(d, months) {
-    var newDate = this.clone(d);
-    newDate.setMonth(d.getMonth() + months);
-    return newDate;
-  },
-
-  clone: function(d) {
-    return new Date(d.getTime());
-  },
-
-  getDaysInMonth: function(d) {
-    var resultDate = this.getFirstDayOfMonth(d);
-
-    resultDate.setMonth(resultDate.getMonth() + 1);
-    resultDate.setDate(resultDate.getDate() - 1);
-
-    return resultDate.getDate();
-  },
-
-  getFirstDayOfMonth: function(d) {
-    return new Date(d.getFullYear(), d.getMonth(), 1);
-  },
-
-  getFullMonth: function(d) {
-    var month = d.getMonth();
-    switch (month) {
-      case 0: return 'January';
-      case 1: return 'February';
-      case 2: return 'March';
-      case 3: return 'April';
-      case 4: return 'May';
-      case 5: return 'June';
-      case 6: return 'July';
-      case 7: return 'August';
-      case 8: return 'September';
-      case 9: return 'October';
-      case 10: return 'November';
-      case 11: return 'December';
-    }
-  },
-
-  getShortMonth: function(d) {
-    var month = d.getMonth();
-    switch (month) {
-      case 0: return 'Jan';
-      case 1: return 'Feb';
-      case 2: return 'Mar';
-      case 3: return 'Apr';
-      case 4: return 'May';
-      case 5: return 'Jun';
-      case 6: return 'Jul';
-      case 7: return 'Aug';
-      case 8: return 'Sep';
-      case 9: return 'Oct';
-      case 10: return 'Nov';
-      case 11: return 'Dec';
-    }
-  },
-
-  getDayOfWeek: function(d) {
-    var dow = d.getDay();
-    switch (dow) {
-      case 0: return 'Sunday';
-      case 1: return 'Monday';
-      case 2: return 'Tuesday';
-      case 3: return 'Wednesday';
-      case 4: return 'Thursday';
-      case 5: return 'Friday';
-      case 6: return 'Saturday';
-    }
-  },
-
-  getWeekArray: function(d) {
-    var dayArray = [];
-    var daysInMonth = this.getDaysInMonth(d);
-    var daysInWeek;
-    var emptyDays;
-    var firstDayOfWeek;
-    var week;
-    var weekArray = [];
-
-    for (var i = 1; i <= daysInMonth; i++) {
-      dayArray.push(new Date(d.getFullYear(), d.getMonth(), i));
-    };
-
-    while (dayArray.length) {
-      firstDayOfWeek = dayArray[0].getDay();
-      daysInWeek = 7 - firstDayOfWeek;
-      emptyDays = 7 - daysInWeek;
-      week = dayArray.splice(0, daysInWeek);
-
-      for (var i = 0; i < emptyDays; i++) {
-        week.unshift(null);
-      };
-
-      weekArray.push(week);
-    }
-
-    return weekArray;
-  },
-
-  format: function(date) {
-    var m = date.getMonth() + 1;
-    var d = date.getDate();
-    var y = date.getFullYear();
-    return m + '/' + d + '/' + y;
-  },
-
-  isEqualDate: function(d1, d2) {
-    return d1 && d2 &&
-      (d1.getFullYear() === d2.getFullYear()) &&
-      (d1.getMonth() === d2.getMonth()) &&
-      (d1.getDate() === d2.getDate());
-  },
-
-  monthDiff: function(d1, d2) {
-    var m;
-    m = (d1.getFullYear() - d2.getFullYear()) * 12;
-    m += d1.getMonth();
-    m -= d2.getMonth();
-    return m;
-  }
-
-}
-},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\dom.js":[function(require,module,exports){
-module.exports = {
-
-  isDescendant: function(parent, child) {
-    var node = child.parentNode;
-
-    while (node != null) {
-      if (node == parent) return true;
-      node = node.parentNode;
-    }
-
-    return false;
-  },
-
-  offset: function(el) {
-    var rect = el.getBoundingClientRect()
-    return {
-      top: rect.top + document.body.scrollTop,
-      left: rect.left + document.body.scrollLeft
-    };
-  },
-
-  addClass: function(el, className) {
-    if (el.classList)
-      el.classList.add(className);
-    else
-      el.className += ' ' + className;
-  },
-
-  removeClass: function(el, className) {
-    if (el.classList)
-      el.classList.remove(className);
-    else
-      el.className = el.className.replace(new RegExp('(^|\\b)' + className.split(' ').join('|') + '(\\b|$)', 'gi'), ' ');
-  },
-
-  hasClass: function(el, className) {
-    if (el.classList)
-      return el.classList.contains(className);
-    else
-      return new RegExp('(^| )' + className + '( |$)', 'gi').test(el.className);
-  },
-
-  toggleClass: function(el, className) {
-    if (this.hasClass(el, className))
-      this.removeClass(el, className);
-    else
-      this.addClass(el, className);
-  },
-
-  forceRedraw: function(el) {
-    var originalDisplay = el.style.display;
-
-    el.style.display = 'none';
-    el.offsetHeight;
-    el.style.display = originalDisplay;
-  },
-
-  withoutTransition: function(el, callback) {
-    //turn off transition
-    el.style.transition = 'none';
-    
-    callback();
-
-    //force a redraw
-    this.forceRedraw(el);
-
-    //put the transition back
-    el.style.transition = '';
-  }
-  
-}
-},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\events.js":[function(require,module,exports){
-module.exports = {
-
-  once: function (el, type, callback) {
-    var typeArray = type.split(' ');
-
-    for (var i = typeArray.length - 1; i >= 0; i--) {
-      el.addEventListener(typeArray[i], function(e) {
-        e.target.removeEventListener(e.type, arguments.callee);
-        return callback(e);
-      });
-    };
-  },
-
-  on: function(el, type, callback, capture) {
-    el.addEventListener(type, callback, capture || false);
-  },
-
-  off: function(el, type, callback, capture) {
-    el.removeEventListener(type, callback, capture || false);
-  }
-
-}
-},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\key-code.js":[function(require,module,exports){
-module.exports = {
-  DOWN: 40,
-  ESC: 27,
-  ENTER: 13,
-  LEFT: 37,
-  RIGHT: 39,
-  TAB: 9,
-  UP: 38
-}
-},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\material-ui\\src\\js\\utils\\key-line.js":[function(require,module,exports){
-module.exports = {
-
-  Desktop: {
-    GUTTER: 24,
-    GUTTER_LESS: 16,
-    INCREMENT: 64,
-    MENU_ITEM_HEIGHT: 32
-  },
-
-  getIncrementalDim: function(dim) {
-    return Math.ceil(dim / this.Desktop.INCREMENT) * this.Desktop.INCREMENT;
-  }
-}
-
-},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\actions\\LocationActions.js":[function(require,module,exports){
+},{"react/addons":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\addons.js","react/lib/emptyFunction":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\emptyFunction.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Cancellation.js":[function(require,module,exports){
 /**
- * Actions that modify the URL.
+ * Represents a cancellation caused by navigating away
+ * before the previous transition has fully resolved.
  */
-var LocationActions = {
+function Cancellation() {}
 
-  /**
-   * Indicates a new location is being pushed to the history stack.
-   */
-  PUSH: 'push',
+module.exports = Cancellation;
 
-  /**
-   * Indicates the current location should be replaced.
-   */
-  REPLACE: 'replace',
-
-  /**
-   * Indicates the most recent entry should be removed from the history stack.
-   */
-  POP: 'pop'
-
-};
-
-module.exports = LocationActions;
-
-},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\behaviors\\ImitateBrowserBehavior.js":[function(require,module,exports){
-var LocationActions = require('../actions/LocationActions');
-
-/**
- * A scroll behavior that attempts to imitate the default behavior
- * of modern browsers.
- */
-var ImitateBrowserBehavior = {
-
-  updateScrollPosition: function (position, actionType) {
-    switch (actionType) {
-      case LocationActions.PUSH:
-      case LocationActions.REPLACE:
-        window.scrollTo(0, 0);
-        break;
-      case LocationActions.POP:
-        if (position) {
-          window.scrollTo(position.x, position.y);
-        } else {
-          window.scrollTo(0, 0);
-        }
-        break;
-    }
-  }
-
-};
-
-module.exports = ImitateBrowserBehavior;
-
-},{"../actions/LocationActions":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\actions\\LocationActions.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\behaviors\\ScrollToTopBehavior.js":[function(require,module,exports){
-/**
- * A scroll behavior that always scrolls to the top of the page
- * after a transition.
- */
-var ScrollToTopBehavior = {
-
-  updateScrollPosition: function () {
-    window.scrollTo(0, 0);
-  }
-
-};
-
-module.exports = ScrollToTopBehavior;
-
-},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\DefaultRoute.js":[function(require,module,exports){
-var React = require('react');
-var FakeNode = require('../mixins/FakeNode');
-var PropTypes = require('../utils/PropTypes');
-
-/**
- * A <DefaultRoute> component is a special kind of <Route> that
- * renders when its parent matches but none of its siblings do.
- * Only one such route may be used at any given level in the
- * route hierarchy.
- */
-var DefaultRoute = React.createClass({
-
-  displayName: 'DefaultRoute',
-
-  mixins: [ FakeNode ],
-
-  propTypes: {
-    name: React.PropTypes.string,
-    path: PropTypes.falsy,
-    handler: React.PropTypes.func.isRequired
-  }
-
-});
-
-module.exports = DefaultRoute;
-
-},{"../mixins/FakeNode":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\FakeNode.js","../utils/PropTypes":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\PropTypes.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\Link.js":[function(require,module,exports){
-var React = require('react');
-var classSet = require('react/lib/cx');
-var assign = require('react/lib/Object.assign');
-var Navigation = require('../mixins/Navigation');
-var State = require('../mixins/State');
-
-function isLeftClickEvent(event) {
-  return event.button === 0;
-}
-
-function isModifiedEvent(event) {
-  return !!(event.metaKey || event.altKey || event.ctrlKey || event.shiftKey);
-}
-
-/**
- * <Link> components are used to create an <a> element that links to a route.
- * When that route is active, the link gets an "active" class name (or the
- * value of its `activeClassName` prop).
- *
- * For example, assuming you have the following route:
- *
- *   <Route name="showPost" path="/posts/:postID" handler={Post}/>
- *
- * You could use the following component to link to that route:
- *
- *   <Link to="showPost" params={{ postID: "123" }} />
- *
- * In addition to params, links may pass along query string parameters
- * using the `query` prop.
- *
- *   <Link to="showPost" params={{ postID: "123" }} query={{ show:true }}/>
- */
-var Link = React.createClass({
-
-  displayName: 'Link',
-
-  mixins: [ Navigation, State ],
-
-  propTypes: {
-    activeClassName: React.PropTypes.string.isRequired,
-    to: React.PropTypes.string.isRequired,
-    params: React.PropTypes.object,
-    query: React.PropTypes.object,
-    onClick: React.PropTypes.func
-  },
-
-  getDefaultProps: function () {
-    return {
-      activeClassName: 'active'
-    };
-  },
-
-  handleClick: function (event) {
-    var allowTransition = true;
-    var clickResult;
-
-    if (this.props.onClick)
-      clickResult = this.props.onClick(event);
-
-    if (isModifiedEvent(event) || !isLeftClickEvent(event))
-      return;
-
-    if (clickResult === false || event.defaultPrevented === true)
-      allowTransition = false;
-
-    event.preventDefault();
-
-    if (allowTransition)
-      this.transitionTo(this.props.to, this.props.params, this.props.query);
-  },
-
-  /**
-   * Returns the value of the "href" attribute to use on the DOM element.
-   */
-  getHref: function () {
-    return this.makeHref(this.props.to, this.props.params, this.props.query);
-  },
-
-  /**
-   * Returns the value of the "class" attribute to use on the DOM element, which contains
-   * the value of the activeClassName property when this <Link> is active.
-   */
-  getClassName: function () {
-    var classNames = {};
-
-    if (this.props.className)
-      classNames[this.props.className] = true;
-
-    if (this.isActive(this.props.to, this.props.params, this.props.query))
-      classNames[this.props.activeClassName] = true;
-
-    return classSet(classNames);
-  },
-
-  render: function () {
-    var props = assign({}, this.props, {
-      href: this.getHref(),
-      className: this.getClassName(),
-      onClick: this.handleClick
-    });
-
-    return React.DOM.a(props, this.props.children);
-  }
-
-});
-
-module.exports = Link;
-
-},{"../mixins/Navigation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\Navigation.js","../mixins/State":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\State.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react/lib/Object.assign":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\Object.assign.js","react/lib/cx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\cx.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\NotFoundRoute.js":[function(require,module,exports){
-var React = require('react');
-var FakeNode = require('../mixins/FakeNode');
-var PropTypes = require('../utils/PropTypes');
-
-/**
- * A <NotFoundRoute> is a special kind of <Route> that
- * renders when the beginning of its parent's path matches
- * but none of its siblings do, including any <DefaultRoute>.
- * Only one such route may be used at any given level in the
- * route hierarchy.
- */
-var NotFoundRoute = React.createClass({
-
-  displayName: 'NotFoundRoute',
-
-  mixins: [ FakeNode ],
-
-  propTypes: {
-    name: React.PropTypes.string,
-    path: PropTypes.falsy,
-    handler: React.PropTypes.func.isRequired
-  }
-
-});
-
-module.exports = NotFoundRoute;
-
-},{"../mixins/FakeNode":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\FakeNode.js","../utils/PropTypes":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\PropTypes.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\Redirect.js":[function(require,module,exports){
-var React = require('react');
-var FakeNode = require('../mixins/FakeNode');
-var PropTypes = require('../utils/PropTypes');
-
-/**
- * A <Redirect> component is a special kind of <Route> that always
- * redirects to another route when it matches.
- */
-var Redirect = React.createClass({
-
-  displayName: 'Redirect',
-
-  mixins: [ FakeNode ],
-
-  propTypes: {
-    path: React.PropTypes.string,
-    from: React.PropTypes.string, // Alias for path.
-    to: React.PropTypes.string,
-    handler: PropTypes.falsy
-  }
-
-});
-
-module.exports = Redirect;
-
-},{"../mixins/FakeNode":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\FakeNode.js","../utils/PropTypes":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\PropTypes.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\Route.js":[function(require,module,exports){
-var React = require('react');
-var FakeNode = require('../mixins/FakeNode');
-
-/**
- * <Route> components specify components that are rendered to the page when the
- * URL matches a given pattern.
- *
- * Routes are arranged in a nested tree structure. When a new URL is requested,
- * the tree is searched depth-first to find a route whose path matches the URL.
- * When one is found, all routes in the tree that lead to it are considered
- * "active" and their components are rendered into the DOM, nested in the same
- * order as they are in the tree.
- *
- * The preferred way to configure a router is using JSX. The XML-like syntax is
- * a great way to visualize how routes are laid out in an application.
- *
- *   var routes = [
- *     <Route handler={App}>
- *       <Route name="login" handler={Login}/>
- *       <Route name="logout" handler={Logout}/>
- *       <Route name="about" handler={About}/>
- *     </Route>
- *   ];
- *   
- *   Router.run(routes, function (Handler) {
- *     React.render(<Handler/>, document.body);
- *   });
- *
- * Handlers for Route components that contain children can render their active
- * child route using a <RouteHandler> element.
- *
- *   var App = React.createClass({
- *     render: function () {
- *       return (
- *         <div class="application">
- *           <RouteHandler/>
- *         </div>
- *       );
- *     }
- *   });
- */
-var Route = React.createClass({
-
-  displayName: 'Route',
-
-  mixins: [ FakeNode ],
-
-  propTypes: {
-    name: React.PropTypes.string,
-    path: React.PropTypes.string,
-    handler: React.PropTypes.func.isRequired,
-    ignoreScrollBehavior: React.PropTypes.bool
-  }
-
-});
-
-module.exports = Route;
-
-},{"../mixins/FakeNode":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\FakeNode.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\RouteHandler.js":[function(require,module,exports){
-var React = require('react');
-var RouteHandlerMixin = require('../mixins/RouteHandler');
-
-/**
- * A <RouteHandler> component renders the active child route handler
- * when routes are nested.
- */
-var RouteHandler = React.createClass({
-
-  displayName: 'RouteHandler',
-
-  mixins: [RouteHandlerMixin],
-
-  getDefaultProps: function () {
-    return {
-      ref: '__routeHandler__'
-    };
-  },
-
-  render: function () {
-    return this.getRouteHandler();
-  }
-
-});
-
-module.exports = RouteHandler;
-
-},{"../mixins/RouteHandler":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\RouteHandler.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js":[function(require,module,exports){
-exports.DefaultRoute = require('./components/DefaultRoute');
-exports.Link = require('./components/Link');
-exports.NotFoundRoute = require('./components/NotFoundRoute');
-exports.Redirect = require('./components/Redirect');
-exports.Route = require('./components/Route');
-exports.RouteHandler = require('./components/RouteHandler');
-
-exports.HashLocation = require('./locations/HashLocation');
-exports.HistoryLocation = require('./locations/HistoryLocation');
-exports.RefreshLocation = require('./locations/RefreshLocation');
-
-exports.ImitateBrowserBehavior = require('./behaviors/ImitateBrowserBehavior');
-exports.ScrollToTopBehavior = require('./behaviors/ScrollToTopBehavior');
-
-exports.Navigation = require('./mixins/Navigation');
-exports.State = require('./mixins/State');
-
-exports.create = require('./utils/createRouter');
-exports.run = require('./utils/runRouter');
-
-exports.History = require('./utils/History');
-
-},{"./behaviors/ImitateBrowserBehavior":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\behaviors\\ImitateBrowserBehavior.js","./behaviors/ScrollToTopBehavior":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\behaviors\\ScrollToTopBehavior.js","./components/DefaultRoute":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\DefaultRoute.js","./components/Link":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\Link.js","./components/NotFoundRoute":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\NotFoundRoute.js","./components/Redirect":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\Redirect.js","./components/Route":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\Route.js","./components/RouteHandler":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\RouteHandler.js","./locations/HashLocation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\HashLocation.js","./locations/HistoryLocation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\HistoryLocation.js","./locations/RefreshLocation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\RefreshLocation.js","./mixins/Navigation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\Navigation.js","./mixins/State":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\State.js","./utils/History":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\History.js","./utils/createRouter":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\createRouter.js","./utils/runRouter":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\runRouter.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\HashLocation.js":[function(require,module,exports){
-var LocationActions = require('../actions/LocationActions');
-var History = require('../utils/History');
-var Path = require('../utils/Path');
-
-/**
- * Returns the current URL path from the `hash` portion of the URL, including
- * query string.
- */
-function getHashPath() {
-  return Path.decode(
-    // We can't use window.location.hash here because it's not
-    // consistent across browsers - Firefox will pre-decode it!
-    window.location.href.split('#')[1] || ''
-  );
-}
-
-var _actionType;
-
-function ensureSlash() {
-  var path = getHashPath();
-
-  if (path.charAt(0) === '/')
-    return true;
-
-  HashLocation.replace('/' + path);
-
-  return false;
-}
-
-var _changeListeners = [];
-
-function notifyChange(type) {
-  if (type === LocationActions.PUSH)
-    History.length += 1;
-
-  var change = {
-    path: getHashPath(),
-    type: type
-  };
-
-  _changeListeners.forEach(function (listener) {
-    listener(change);
-  });
-}
-
-var _isListening = false;
-
-function onHashChange() {
-  if (ensureSlash()) {
-    // If we don't have an _actionType then all we know is the hash
-    // changed. It was probably caused by the user clicking the Back
-    // button, but may have also been the Forward button or manual
-    // manipulation. So just guess 'pop'.
-    notifyChange(_actionType || LocationActions.POP);
-    _actionType = null;
-  }
-}
-
-/**
- * A Location that uses `window.location.hash`.
- */
-var HashLocation = {
-
-  addChangeListener: function (listener) {
-    _changeListeners.push(listener);
-
-    // Do this BEFORE listening for hashchange.
-    ensureSlash();
-
-    if (_isListening)
-      return;
-
-    if (window.addEventListener) {
-      window.addEventListener('hashchange', onHashChange, false);
-    } else {
-      window.attachEvent('onhashchange', onHashChange);
-    }
-
-    _isListening = true;
-  },
-
-  removeChangeListener: function(listener) {
-    for (var i = 0, l = _changeListeners.length; i < l; i ++) {
-      if (_changeListeners[i] === listener) {
-        _changeListeners.splice(i, 1);
-        break;
-      }
-    }
-
-    if (window.removeEventListener) {
-      window.removeEventListener('hashchange', onHashChange, false);
-    } else {
-      window.removeEvent('onhashchange', onHashChange);
-    }
-
-    if (_changeListeners.length === 0)
-      _isListening = false;
-  },
-
-
-
-  push: function (path) {
-    _actionType = LocationActions.PUSH;
-    window.location.hash = Path.encode(path);
-  },
-
-  replace: function (path) {
-    _actionType = LocationActions.REPLACE;
-    window.location.replace(window.location.pathname + '#' + Path.encode(path));
-  },
-
-  pop: function () {
-    _actionType = LocationActions.POP;
-    History.back();
-  },
-
-  getCurrentPath: getHashPath,
-
-  toString: function () {
-    return '<HashLocation>';
-  }
-
-};
-
-module.exports = HashLocation;
-
-},{"../actions/LocationActions":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\actions\\LocationActions.js","../utils/History":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\History.js","../utils/Path":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Path.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\HistoryLocation.js":[function(require,module,exports){
-var LocationActions = require('../actions/LocationActions');
-var History = require('../utils/History');
-var Path = require('../utils/Path');
-
-/**
- * Returns the current URL path from `window.location`, including query string.
- */
-function getWindowPath() {
-  return Path.decode(
-    window.location.pathname + window.location.search
-  );
-}
-
-var _changeListeners = [];
-
-function notifyChange(type) {
-  var change = {
-    path: getWindowPath(),
-    type: type
-  };
-
-  _changeListeners.forEach(function (listener) {
-    listener(change);
-  });
-}
-
-var _isListening = false;
-
-function onPopState() {
-  notifyChange(LocationActions.POP);
-}
-
-/**
- * A Location that uses HTML5 history.
- */
-var HistoryLocation = {
-
-  addChangeListener: function (listener) {
-    _changeListeners.push(listener);
-
-    if (_isListening)
-      return;
-
-    if (window.addEventListener) {
-      window.addEventListener('popstate', onPopState, false);
-    } else {
-      window.attachEvent('popstate', onPopState);
-    }
-
-    _isListening = true;
-  },
-
-  removeChangeListener: function(listener) {
-    for (var i = 0, l = _changeListeners.length; i < l; i ++) {
-      if (_changeListeners[i] === listener) {
-        _changeListeners.splice(i, 1);
-        break;
-      }
-    }
-
-    if (window.addEventListener) {
-      window.removeEventListener('popstate', onPopState);
-    } else {
-      window.removeEvent('popstate', onPopState);
-    }
-
-    if (_changeListeners.length === 0)
-      _isListening = false;
-  },
-
-
-
-  push: function (path) {
-    window.history.pushState({ path: path }, '', Path.encode(path));
-    History.length += 1;
-    notifyChange(LocationActions.PUSH);
-  },
-
-  replace: function (path) {
-    window.history.replaceState({ path: path }, '', Path.encode(path));
-    notifyChange(LocationActions.REPLACE);
-  },
-
-  pop: History.back,
-
-  getCurrentPath: getWindowPath,
-
-  toString: function () {
-    return '<HistoryLocation>';
-  }
-
-};
-
-module.exports = HistoryLocation;
-
-},{"../actions/LocationActions":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\actions\\LocationActions.js","../utils/History":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\History.js","../utils/Path":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Path.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\RefreshLocation.js":[function(require,module,exports){
-var HistoryLocation = require('./HistoryLocation');
-var History = require('../utils/History');
-var Path = require('../utils/Path');
-
-/**
- * A Location that uses full page refreshes. This is used as
- * the fallback for HistoryLocation in browsers that do not
- * support the HTML5 history API.
- */
-var RefreshLocation = {
-
-  push: function (path) {
-    window.location = Path.encode(path);
-  },
-
-  replace: function (path) {
-    window.location.replace(Path.encode(path));
-  },
-
-  pop: History.back,
-
-  getCurrentPath: HistoryLocation.getCurrentPath,
-
-  toString: function () {
-    return '<RefreshLocation>';
-  }
-
-};
-
-module.exports = RefreshLocation;
-
-},{"../utils/History":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\History.js","../utils/Path":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Path.js","./HistoryLocation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\HistoryLocation.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\FakeNode.js":[function(require,module,exports){
+},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Configuration.js":[function(require,module,exports){
+var warning = require('react/lib/warning');
 var invariant = require('react/lib/invariant');
 
-var FakeNode = {
+function checkPropTypes(componentName, propTypes, props) {
+  for (var propName in propTypes) {
+    if (propTypes.hasOwnProperty(propName)) {
+      var error = propTypes[propName](props, propName, componentName);
+
+      if (error instanceof Error)
+        warning(false, error.message);
+    }
+  }
+}
+
+var Configuration = {
+
+  statics: {
+
+    validateProps: function (props) {
+      checkPropTypes(this.displayName, this.propTypes, props);
+    }
+
+  },
 
   render: function () {
     invariant(
       false,
-      '%s elements should not be rendered',
+      '%s elements are for router configuration only and should not be rendered',
       this.constructor.displayName
     );
   }
 
 };
 
-module.exports = FakeNode;
+module.exports = Configuration;
 
-},{"react/lib/invariant":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\invariant.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\Navigation.js":[function(require,module,exports){
-var React = require('react');
+},{"react/lib/invariant":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\invariant.js","react/lib/warning":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\warning.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\History.js":[function(require,module,exports){
+var invariant = require('react/lib/invariant');
+var canUseDOM = require('react/lib/ExecutionEnvironment').canUseDOM;
+
+var History = {
+
+  /**
+   * The current number of entries in the history.
+   *
+   * Note: This property is read-only.
+   */
+  length: 1,
+
+  /**
+   * Sends the browser back one entry in the history.
+   */
+  back: function () {
+    invariant(
+      canUseDOM,
+      'Cannot use History.back without a DOM'
+    );
+
+    // Do this first so that History.length will
+    // be accurate in location change listeners.
+    History.length -= 1;
+
+    window.history.back();
+  }
+
+};
+
+module.exports = History;
+
+},{"react/lib/ExecutionEnvironment":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\ExecutionEnvironment.js","react/lib/invariant":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\invariant.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Navigation.js":[function(require,module,exports){
+var PropTypes = require('./PropTypes');
 
 /**
  * A mixin for components that modify the URL.
@@ -8325,11 +17081,11 @@ var React = require('react');
 var Navigation = {
 
   contextTypes: {
-    makePath: React.PropTypes.func.isRequired,
-    makeHref: React.PropTypes.func.isRequired,
-    transitionTo: React.PropTypes.func.isRequired,
-    replaceWith: React.PropTypes.func.isRequired,
-    goBack: React.PropTypes.func.isRequired
+    makePath: PropTypes.func.isRequired,
+    makeHref: PropTypes.func.isRequired,
+    transitionTo: PropTypes.func.isRequired,
+    replaceWith: PropTypes.func.isRequired,
+    goBack: PropTypes.func.isRequired
   },
 
   /**
@@ -8375,8 +17131,8 @@ var Navigation = {
 
 module.exports = Navigation;
 
-},{"react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\NavigationContext.js":[function(require,module,exports){
-var React = require('react');
+},{"./PropTypes":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\PropTypes.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\NavigationContext.js":[function(require,module,exports){
+var PropTypes = require('./PropTypes');
 
 /**
  * Provides the router with context for Router.Navigation.
@@ -8384,20 +17140,20 @@ var React = require('react');
 var NavigationContext = {
 
   childContextTypes: {
-    makePath: React.PropTypes.func.isRequired,
-    makeHref: React.PropTypes.func.isRequired,
-    transitionTo: React.PropTypes.func.isRequired,
-    replaceWith: React.PropTypes.func.isRequired,
-    goBack: React.PropTypes.func.isRequired
+    makePath: PropTypes.func.isRequired,
+    makeHref: PropTypes.func.isRequired,
+    transitionTo: PropTypes.func.isRequired,
+    replaceWith: PropTypes.func.isRequired,
+    goBack: PropTypes.func.isRequired
   },
 
   getChildContext: function () {
     return {
-      makePath: this.constructor.makePath,
-      makeHref: this.constructor.makeHref,
-      transitionTo: this.constructor.transitionTo,
-      replaceWith: this.constructor.replaceWith,
-      goBack: this.constructor.goBack
+      makePath: this.constructor.makePath.bind(this.constructor),
+      makeHref: this.constructor.makeHref.bind(this.constructor),
+      transitionTo: this.constructor.transitionTo.bind(this.constructor),
+      replaceWith: this.constructor.replaceWith.bind(this.constructor),
+      goBack: this.constructor.goBack.bind(this.constructor)
     };
   }
 
@@ -8405,28 +17161,59 @@ var NavigationContext = {
 
 module.exports = NavigationContext;
 
-},{"react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\RouteHandler.js":[function(require,module,exports){
-var React = require('react');
+},{"./PropTypes":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\PropTypes.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\PropTypes.js":[function(require,module,exports){
+var assign = require('react/lib/Object.assign');
+var ReactPropTypes = require('react').PropTypes;
 
-module.exports = {
+var PropTypes = assign({
+
+  /**
+   * Requires that the value of a prop be falsy.
+   */
+  falsy: function (props, propName, componentName) {
+    if (props[propName])
+      return new Error('<' + componentName + '> may not have a "' + propName + '" prop');
+  }
+
+}, ReactPropTypes);
+
+module.exports = PropTypes;
+
+},{"react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react/lib/Object.assign":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\Object.assign.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Redirect.js":[function(require,module,exports){
+/**
+ * Encapsulates a redirect to the given route.
+ */
+function Redirect(to, params, query) {
+  this.to = to;
+  this.params = params;
+  this.query = query;
+}
+
+module.exports = Redirect;
+
+},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\RouteHandlerMixin.js":[function(require,module,exports){
+var React = require('react');
+var assign = require('react/lib/Object.assign');
+var PropTypes = require('./PropTypes');
+
+var REF_NAME = '__routeHandler__';
+
+var RouteHandlerMixin = {
+
   contextTypes: {
-    getRouteAtDepth: React.PropTypes.func.isRequired,
-    getRouteComponents: React.PropTypes.func.isRequired,
-    routeHandlers: React.PropTypes.array.isRequired
+    getRouteAtDepth: PropTypes.func.isRequired,
+    setRouteComponentAtDepth: PropTypes.func.isRequired,
+    routeHandlers: PropTypes.array.isRequired
   },
 
   childContextTypes: {
-    routeHandlers: React.PropTypes.array.isRequired
+    routeHandlers: PropTypes.array.isRequired
   },
 
   getChildContext: function () {
     return {
       routeHandlers: this.context.routeHandlers.concat([ this ])
     };
-  },
-
-  getRouteDepth: function () {
-    return this.context.routeHandlers.length - 1;
   },
 
   componentDidMount: function () {
@@ -8437,21 +17224,191 @@ module.exports = {
     this._updateRouteComponent();
   },
 
-  _updateRouteComponent: function () {
-    var depth = this.getRouteDepth();
-    var components = this.context.getRouteComponents();
-    components[depth] = this.refs[this.props.ref || '__routeHandler__'];
+  componentWillUnmount: function () {
+    this.context.setRouteComponentAtDepth(this.getRouteDepth(), null);
   },
 
-  getRouteHandler: function (props) {
+  _updateRouteComponent: function () {
+    this.context.setRouteComponentAtDepth(this.getRouteDepth(), this.refs[REF_NAME]);
+  },
+
+  getRouteDepth: function () {
+    return this.context.routeHandlers.length;
+  },
+
+  createChildRouteHandler: function (props) {
     var route = this.context.getRouteAtDepth(this.getRouteDepth());
-    return route ? React.createElement(route.handler, props || this.props) : null;
+    return route ? React.createElement(route.handler, assign({}, props || this.props, { ref: REF_NAME })) : null;
   }
+
 };
-},{"react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\Scrolling.js":[function(require,module,exports){
+
+module.exports = RouteHandlerMixin;
+
+},{"./PropTypes":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\PropTypes.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react/lib/Object.assign":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\Object.assign.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Routing.js":[function(require,module,exports){
+/* jshint -W084 */
+var React = require('react');
+var invariant = require('react/lib/invariant');
+var DefaultRoute = require('./components/DefaultRoute');
+var NotFoundRoute = require('./components/NotFoundRoute');
+var Redirect = require('./components/Redirect');
+var Path = require('./utils/Path');
+
+function createTransitionToHook(to, _params, _query) {
+  return function (transition, params, query) {
+    transition.redirect(to, _params || params, _query || query);
+  };
+}
+
+function createRoute(element, parentRoute, namedRoutes) {
+  var type = element.type;
+  var props = element.props;
+
+  if (type.validateProps)
+    type.validateProps(props);
+
+  var options = {
+    name: props.name,
+    ignoreScrollBehavior: !!props.ignoreScrollBehavior
+  };
+
+  if (type === Redirect.type) {
+    options.willTransitionTo = createTransitionToHook(props.to, props.params, props.query);
+    props.path = props.path || props.from || '*';
+  } else {
+    options.handler = props.handler;
+    options.willTransitionTo = props.handler && props.handler.willTransitionTo;
+    options.willTransitionFrom = props.handler && props.handler.willTransitionFrom;
+  }
+
+  var parentPath = (parentRoute && parentRoute.path) || '/';
+
+  if ((props.path || props.name) && type !== DefaultRoute.type && type !== NotFoundRoute.type) {
+    var path = props.path || props.name;
+
+    // Relative paths extend their parent.
+    if (!Path.isAbsolute(path))
+      path = Path.join(parentPath, path);
+
+    options.path = Path.normalize(path);
+  } else {
+    options.path = parentPath;
+
+    if (type === NotFoundRoute.type)
+      options.path += '*';
+  }
+
+  options.paramNames = Path.extractParamNames(options.path);
+
+  // Make sure the route's path has all params its parent needs.
+  if (parentRoute && Array.isArray(parentRoute.paramNames)) {
+    parentRoute.paramNames.forEach(function (paramName) {
+      invariant(
+        options.paramNames.indexOf(paramName) !== -1,
+        'The nested route path "%s" is missing the "%s" parameter of its parent path "%s"',
+        options.path, paramName, parentRoute.path
+      );
+    });
+  }
+
+  var route = new Route(options);
+
+  // Make sure the route can be looked up by <Link>s.
+  if (props.name) {
+    invariant(
+      namedRoutes[props.name] == null,
+      'You cannot use the name "%s" for more than one route',
+      props.name
+    );
+
+    namedRoutes[props.name] = route;
+  }
+
+  // Handle <NotFoundRoute>.
+  if (type === NotFoundRoute.type) {
+    invariant(
+      parentRoute,
+      '<NotFoundRoute> must have a parent <Route>'
+    );
+
+    invariant(
+      parentRoute.notFoundRoute == null,
+      'You may not have more than one <NotFoundRoute> per <Route>'
+    );
+
+    invariant(
+      props.children == null,
+      '<NotFoundRoute> must not have children'
+    );
+
+    parentRoute.notFoundRoute = route;
+
+    return null;
+  }
+
+  // Handle <DefaultRoute>.
+  if (type === DefaultRoute.type) {
+    invariant(
+      parentRoute,
+      '<DefaultRoute> must have a parent <Route>'
+    );
+
+    invariant(
+      parentRoute.defaultRoute == null,
+      'You may not have more than one <DefaultRoute> per <Route>'
+    );
+
+    invariant(
+      props.children == null,
+      '<DefaultRoute> must not have children'
+    );
+
+    parentRoute.defaultRoute = route;
+
+    return null;
+  }
+
+  route.routes = createRoutesFromReactChildren(props.children, route, namedRoutes);
+
+  return route;
+}
+
+/**
+ * Creates and returns an array of route objects from the given ReactChildren.
+ */
+function createRoutesFromReactChildren(children, parentRoute, namedRoutes) {
+  var routes = [];
+
+  React.Children.forEach(children, function (child) {
+    // Exclude null values, <DefaultRoute>s and <NotFoundRoute>s.
+    if (React.isValidElement(child) && (child = createRoute(child, parentRoute, namedRoutes)))
+      routes.push(child);
+  });
+
+  return routes;
+}
+
+function Route(options) {
+  options = options || {};
+
+  this.name = options.name;
+  this.path = options.path || '/';
+  this.paramNames = options.paramNames || Path.extractParamNames(this.path);
+  this.ignoreScrollBehavior = !!options.ignoreScrollBehavior;
+  this.willTransitionTo = options.willTransitionTo;
+  this.willTransitionFrom = options.willTransitionFrom;
+  this.handler = options.handler;
+}
+
+module.exports = {
+  createRoutesFromReactChildren: createRoutesFromReactChildren,
+  Route: Route
+};
+
+},{"./components/DefaultRoute":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\DefaultRoute.js","./components/NotFoundRoute":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\NotFoundRoute.js","./components/Redirect":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\Redirect.js","./utils/Path":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Path.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react/lib/invariant":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\invariant.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Scrolling.js":[function(require,module,exports){
 var invariant = require('react/lib/invariant');
 var canUseDOM = require('react/lib/ExecutionEnvironment').canUseDOM;
-var getWindowScrollPosition = require('../utils/getWindowScrollPosition');
+var getWindowScrollPosition = require('./utils/getWindowScrollPosition');
 
 function shouldUpdateScroll(state, prevState) {
   if (!prevState)
@@ -8533,8 +17490,8 @@ var Scrolling = {
 
 module.exports = Scrolling;
 
-},{"../utils/getWindowScrollPosition":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\getWindowScrollPosition.js","react/lib/ExecutionEnvironment":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\ExecutionEnvironment.js","react/lib/invariant":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\invariant.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\State.js":[function(require,module,exports){
-var React = require('react');
+},{"./utils/getWindowScrollPosition":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\getWindowScrollPosition.js","react/lib/ExecutionEnvironment":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\ExecutionEnvironment.js","react/lib/invariant":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\invariant.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\State.js":[function(require,module,exports){
+var PropTypes = require('./PropTypes');
 
 /**
  * A mixin for components that need to know the path, routes, URL
@@ -8557,12 +17514,12 @@ var React = require('react');
 var State = {
 
   contextTypes: {
-    getCurrentPath: React.PropTypes.func.isRequired,
-    getCurrentRoutes: React.PropTypes.func.isRequired,
-    getCurrentPathname: React.PropTypes.func.isRequired,
-    getCurrentParams: React.PropTypes.func.isRequired,
-    getCurrentQuery: React.PropTypes.func.isRequired,
-    isActive: React.PropTypes.func.isRequired
+    getCurrentPath: PropTypes.func.isRequired,
+    getCurrentRoutes: PropTypes.func.isRequired,
+    getCurrentPathname: PropTypes.func.isRequired,
+    getCurrentParams: PropTypes.func.isRequired,
+    getCurrentQuery: PropTypes.func.isRequired,
+    isActive: PropTypes.func.isRequired
   },
 
   /**
@@ -8612,10 +17569,10 @@ var State = {
 
 module.exports = State;
 
-},{"react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\StateContext.js":[function(require,module,exports){
-var React = require('react');
+},{"./PropTypes":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\PropTypes.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\StateContext.js":[function(require,module,exports){
 var assign = require('react/lib/Object.assign');
-var Path = require('../utils/Path');
+var PropTypes = require('./PropTypes');
+var Path = require('./utils/Path');
 
 function routeIsActive(activeRoutes, routeName) {
   return activeRoutes.some(function (route) {
@@ -8692,12 +17649,12 @@ var StateContext = {
   },
 
   childContextTypes: {
-    getCurrentPath: React.PropTypes.func.isRequired,
-    getCurrentRoutes: React.PropTypes.func.isRequired,
-    getCurrentPathname: React.PropTypes.func.isRequired,
-    getCurrentParams: React.PropTypes.func.isRequired,
-    getCurrentQuery: React.PropTypes.func.isRequired,
-    isActive: React.PropTypes.func.isRequired
+    getCurrentPath: PropTypes.func.isRequired,
+    getCurrentRoutes: PropTypes.func.isRequired,
+    getCurrentPathname: PropTypes.func.isRequired,
+    getCurrentParams: PropTypes.func.isRequired,
+    getCurrentQuery: PropTypes.func.isRequired,
+    isActive: PropTypes.func.isRequired
   },
 
   getChildContext: function () {
@@ -8715,54 +17672,1311 @@ var StateContext = {
 
 module.exports = StateContext;
 
-},{"../utils/Path":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Path.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react/lib/Object.assign":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\Object.assign.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Cancellation.js":[function(require,module,exports){
+},{"./PropTypes":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\PropTypes.js","./utils/Path":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Path.js","react/lib/Object.assign":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\Object.assign.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Transition.js":[function(require,module,exports){
+/* jshint -W058 */
+var assign = require('react/lib/Object.assign');
+var Redirect = require('./Redirect');
+
 /**
- * Represents a cancellation caused by navigating away
- * before the previous transition has fully resolved.
+ * Encapsulates a transition to a given path.
+ *
+ * The willTransitionTo and willTransitionFrom handlers receive
+ * an instance of this class as their first argument.
  */
-function Cancellation() { }
+function Transition(path, retry) {
+  this.path = path;
+  this.abortReason = null;
+  this.retry = retry.bind(this);
+}
 
-module.exports = Cancellation;
+assign(Transition.prototype, {
 
-},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\History.js":[function(require,module,exports){
-var invariant = require('react/lib/invariant');
-var canUseDOM = require('react/lib/ExecutionEnvironment').canUseDOM;
-
-var History = {
-
-  /**
-   * Sends the browser back one entry in the history.
-   */
-  back: function () {
-    invariant(
-      canUseDOM,
-      'Cannot use History.back without a DOM'
-    );
-
-    // Do this first so that History.length will
-    // be accurate in location change listeners.
-    History.length -= 1;
-
-    window.history.back();
+  abort: function (reason) {
+    if (this.abortReason == null)
+      this.abortReason = reason || 'ABORT';
   },
 
+  redirect: function (to, params, query) {
+    this.abort(new Redirect(to, params, query));
+  },
+
+  from: function (routes, components, callback) {
+    var self = this;
+
+    var runHooks = routes.reduce(function (callback, route, index) {
+      return function (error) {
+        if (error || self.abortReason) {
+          callback(error);
+        } else if (route.willTransitionFrom) {
+          try {
+            route.willTransitionFrom(self, components[index], callback);
+
+            // If there is no callback in the argument list, call it automatically.
+            if (route.willTransitionFrom.length < 3)
+              callback();
+          } catch (e) {
+            callback(e);
+          }
+        } else {
+          callback();
+        }
+      };
+    }, callback);
+
+    runHooks();
+  },
+
+  to: function (routes, params, query, callback) {
+    var self = this;
+
+    var runHooks = routes.reduceRight(function (callback, route) {
+      return function (error) {
+        if (error || self.abortReason) {
+          callback(error);
+        } else if (route.willTransitionTo) {
+          try {
+            route.willTransitionTo(self, params, query, callback);
+
+            // If there is no callback in the argument list, call it automatically.
+            if (route.willTransitionTo.length < 4)
+              callback();
+          } catch (e) {
+            callback(e);
+          }
+        } else {
+          callback();
+        }
+      };
+    }, callback);
+
+    runHooks();
+  }
+
+});
+
+module.exports = Transition;
+
+},{"./Redirect":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Redirect.js","react/lib/Object.assign":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\Object.assign.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\actions\\LocationActions.js":[function(require,module,exports){
+/**
+ * Actions that modify the URL.
+ */
+var LocationActions = {
+
   /**
-   * The current number of entries in the history.
+   * Indicates a new location is being pushed to the history stack.
    */
-  length: 1
+  PUSH: 'push',
+
+  /**
+   * Indicates the current location should be replaced.
+   */
+  REPLACE: 'replace',
+
+  /**
+   * Indicates the most recent entry should be removed from the history stack.
+   */
+  POP: 'pop'
 
 };
 
-module.exports = History;
+module.exports = LocationActions;
 
-},{"react/lib/ExecutionEnvironment":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\ExecutionEnvironment.js","react/lib/invariant":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\invariant.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Path.js":[function(require,module,exports){
+},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\behaviors\\ImitateBrowserBehavior.js":[function(require,module,exports){
+var LocationActions = require('../actions/LocationActions');
+
+/**
+ * A scroll behavior that attempts to imitate the default behavior
+ * of modern browsers.
+ */
+var ImitateBrowserBehavior = {
+
+  updateScrollPosition: function (position, actionType) {
+    switch (actionType) {
+      case LocationActions.PUSH:
+      case LocationActions.REPLACE:
+        window.scrollTo(0, 0);
+        break;
+      case LocationActions.POP:
+        if (position) {
+          window.scrollTo(position.x, position.y);
+        } else {
+          window.scrollTo(0, 0);
+        }
+        break;
+    }
+  }
+
+};
+
+module.exports = ImitateBrowserBehavior;
+
+},{"../actions/LocationActions":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\actions\\LocationActions.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\behaviors\\ScrollToTopBehavior.js":[function(require,module,exports){
+/**
+ * A scroll behavior that always scrolls to the top of the page
+ * after a transition.
+ */
+var ScrollToTopBehavior = {
+
+  updateScrollPosition: function () {
+    window.scrollTo(0, 0);
+  }
+
+};
+
+module.exports = ScrollToTopBehavior;
+
+},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\DefaultRoute.js":[function(require,module,exports){
+var React = require('react');
+var Configuration = require('../Configuration');
+var PropTypes = require('../PropTypes');
+
+/**
+ * A <DefaultRoute> component is a special kind of <Route> that
+ * renders when its parent matches but none of its siblings do.
+ * Only one such route may be used at any given level in the
+ * route hierarchy.
+ */
+var DefaultRoute = React.createClass({
+
+  displayName: 'DefaultRoute',
+
+  mixins: [ Configuration ],
+
+  propTypes: {
+    name: PropTypes.string,
+    path: PropTypes.falsy,
+    children: PropTypes.falsy,
+    handler: PropTypes.func.isRequired
+  }
+
+});
+
+module.exports = DefaultRoute;
+
+},{"../Configuration":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Configuration.js","../PropTypes":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\PropTypes.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\Link.js":[function(require,module,exports){
+var React = require('react');
+var classSet = require('react/lib/cx');
+var assign = require('react/lib/Object.assign');
+var Navigation = require('../Navigation');
+var State = require('../State');
+var PropTypes = require('../PropTypes');
+
+function isLeftClickEvent(event) {
+  return event.button === 0;
+}
+
+function isModifiedEvent(event) {
+  return !!(event.metaKey || event.altKey || event.ctrlKey || event.shiftKey);
+}
+
+/**
+ * <Link> components are used to create an <a> element that links to a route.
+ * When that route is active, the link gets an "active" class name (or the
+ * value of its `activeClassName` prop).
+ *
+ * For example, assuming you have the following route:
+ *
+ *   <Route name="showPost" path="/posts/:postID" handler={Post}/>
+ *
+ * You could use the following component to link to that route:
+ *
+ *   <Link to="showPost" params={{ postID: "123" }} />
+ *
+ * In addition to params, links may pass along query string parameters
+ * using the `query` prop.
+ *
+ *   <Link to="showPost" params={{ postID: "123" }} query={{ show:true }}/>
+ */
+var Link = React.createClass({
+
+  displayName: 'Link',
+
+  mixins: [ Navigation, State ],
+
+  propTypes: {
+    activeClassName: PropTypes.string.isRequired,
+    to: PropTypes.string.isRequired,
+    params: PropTypes.object,
+    query: PropTypes.object,
+    onClick: PropTypes.func
+  },
+
+  getDefaultProps: function () {
+    return {
+      activeClassName: 'active'
+    };
+  },
+
+  handleClick: function (event) {
+    var allowTransition = true;
+    var clickResult;
+
+    if (this.props.onClick)
+      clickResult = this.props.onClick(event);
+
+    if (isModifiedEvent(event) || !isLeftClickEvent(event))
+      return;
+
+    if (clickResult === false || event.defaultPrevented === true)
+      allowTransition = false;
+
+    event.preventDefault();
+
+    if (allowTransition)
+      this.transitionTo(this.props.to, this.props.params, this.props.query);
+  },
+
+  /**
+   * Returns the value of the "href" attribute to use on the DOM element.
+   */
+  getHref: function () {
+    return this.makeHref(this.props.to, this.props.params, this.props.query);
+  },
+
+  /**
+   * Returns the value of the "class" attribute to use on the DOM element, which contains
+   * the value of the activeClassName property when this <Link> is active.
+   */
+  getClassName: function () {
+    var classNames = {};
+
+    if (this.props.className)
+      classNames[this.props.className] = true;
+
+    if (this.isActive(this.props.to, this.props.params, this.props.query))
+      classNames[this.props.activeClassName] = true;
+
+    return classSet(classNames);
+  },
+
+  render: function () {
+    var props = assign({}, this.props, {
+      href: this.getHref(),
+      className: this.getClassName(),
+      onClick: this.handleClick
+    });
+
+    return React.DOM.a(props, this.props.children);
+  }
+
+});
+
+module.exports = Link;
+
+},{"../Navigation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Navigation.js","../PropTypes":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\PropTypes.js","../State":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\State.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react/lib/Object.assign":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\Object.assign.js","react/lib/cx":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\cx.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\NotFoundRoute.js":[function(require,module,exports){
+var React = require('react');
+var Configuration = require('../Configuration');
+var PropTypes = require('../PropTypes');
+
+/**
+ * A <NotFoundRoute> is a special kind of <Route> that
+ * renders when the beginning of its parent's path matches
+ * but none of its siblings do, including any <DefaultRoute>.
+ * Only one such route may be used at any given level in the
+ * route hierarchy.
+ */
+var NotFoundRoute = React.createClass({
+
+  displayName: 'NotFoundRoute',
+
+  mixins: [ Configuration ],
+
+  propTypes: {
+    name: PropTypes.string,
+    path: PropTypes.falsy,
+    children: PropTypes.falsy,
+    handler: PropTypes.func.isRequired
+  }
+
+});
+
+module.exports = NotFoundRoute;
+
+},{"../Configuration":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Configuration.js","../PropTypes":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\PropTypes.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\Redirect.js":[function(require,module,exports){
+var React = require('react');
+var Configuration = require('../Configuration');
+var PropTypes = require('../PropTypes');
+
+/**
+ * A <Redirect> component is a special kind of <Route> that always
+ * redirects to another route when it matches.
+ */
+var Redirect = React.createClass({
+
+  displayName: 'Redirect',
+
+  mixins: [ Configuration ],
+
+  propTypes: {
+    path: PropTypes.string,
+    from: PropTypes.string, // Alias for path.
+    to: PropTypes.string,
+    handler: PropTypes.falsy
+  }
+
+});
+
+module.exports = Redirect;
+
+},{"../Configuration":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Configuration.js","../PropTypes":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\PropTypes.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\Route.js":[function(require,module,exports){
+var React = require('react');
+var Configuration = require('../Configuration');
+var PropTypes = require('../PropTypes');
+var RouteHandler = require('./RouteHandler');
+/**
+ * <Route> components specify components that are rendered to the page when the
+ * URL matches a given pattern.
+ *
+ * Routes are arranged in a nested tree structure. When a new URL is requested,
+ * the tree is searched depth-first to find a route whose path matches the URL.
+ * When one is found, all routes in the tree that lead to it are considered
+ * "active" and their components are rendered into the DOM, nested in the same
+ * order as they are in the tree.
+ *
+ * The preferred way to configure a router is using JSX. The XML-like syntax is
+ * a great way to visualize how routes are laid out in an application.
+ *
+ *   var routes = [
+ *     <Route handler={App}>
+ *       <Route name="login" handler={Login}/>
+ *       <Route name="logout" handler={Logout}/>
+ *       <Route name="about" handler={About}/>
+ *     </Route>
+ *   ];
+ *   
+ *   Router.run(routes, function (Handler) {
+ *     React.render(<Handler/>, document.body);
+ *   });
+ *
+ * Handlers for Route components that contain children can render their active
+ * child route using a <RouteHandler> element.
+ *
+ *   var App = React.createClass({
+ *     render: function () {
+ *       return (
+ *         <div class="application">
+ *           <RouteHandler/>
+ *         </div>
+ *       );
+ *     }
+ *   });
+ *
+ * If no handler is provided for the route, it will render a matched child route.
+ */
+var Route = React.createClass({
+
+  displayName: 'Route',
+
+  mixins: [ Configuration ],
+
+  propTypes: {
+    name: PropTypes.string,
+    path: PropTypes.string,
+    handler: PropTypes.func,
+    ignoreScrollBehavior: PropTypes.bool
+  },
+
+  getDefaultProps: function(){
+    return {
+      handler: RouteHandler
+    };
+  }
+
+});
+
+module.exports = Route;
+
+},{"../Configuration":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Configuration.js","../PropTypes":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\PropTypes.js","./RouteHandler":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\RouteHandler.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\RouteHandler.js":[function(require,module,exports){
+var React = require('react');
+var RouteHandlerMixin = require('../RouteHandlerMixin');
+
+/**
+ * A <RouteHandler> component renders the active child route handler
+ * when routes are nested.
+ */
+var RouteHandler = React.createClass({
+
+  displayName: 'RouteHandler',
+
+  mixins: [ RouteHandlerMixin ],
+
+  render: function () {
+    return this.createChildRouteHandler();
+  }
+
+});
+
+module.exports = RouteHandler;
+
+},{"../RouteHandlerMixin":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\RouteHandlerMixin.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\createRouter.js":[function(require,module,exports){
+(function (process){
+/* jshint -W058 */
+var React = require('react');
+var warning = require('react/lib/warning');
+var invariant = require('react/lib/invariant');
+var canUseDOM = require('react/lib/ExecutionEnvironment').canUseDOM;
+var LocationActions = require('./actions/LocationActions');
+var ImitateBrowserBehavior = require('./behaviors/ImitateBrowserBehavior');
+var HashLocation = require('./locations/HashLocation');
+var HistoryLocation = require('./locations/HistoryLocation');
+var RefreshLocation = require('./locations/RefreshLocation');
+var NavigationContext = require('./NavigationContext');
+var StateContext = require('./StateContext');
+var Scrolling = require('./Scrolling');
+var createRoutesFromReactChildren = require('./Routing').createRoutesFromReactChildren;
+var isReactChildren = require('./isReactChildren');
+var Transition = require('./Transition');
+var PropTypes = require('./PropTypes');
+var Redirect = require('./Redirect');
+var History = require('./History');
+var Cancellation = require('./Cancellation');
+var supportsHistory = require('./utils/supportsHistory');
+var Path = require('./utils/Path');
+
+/**
+ * The default location for new routers.
+ */
+var DEFAULT_LOCATION = canUseDOM ? HashLocation : '/';
+
+/**
+ * The default scroll behavior for new routers.
+ */
+var DEFAULT_SCROLL_BEHAVIOR = canUseDOM ? ImitateBrowserBehavior : null;
+
+function createMatch(route, params, pathname, query) {
+  return {
+    routes: [ route ],
+    params: params,
+    pathname: pathname,
+    query: query
+  };
+}
+
+function findMatch(routes, defaultRoute, notFoundRoute, pathname, query) {
+  var route, match, params;
+
+  for (var i = 0, len = routes.length; i < len; ++i) {
+    route = routes[i];
+
+    // Check the subtree first to find the most deeply-nested match.
+    match = findMatch(route.routes, route.defaultRoute, route.notFoundRoute, pathname, query);
+
+    if (match != null) {
+      match.routes.unshift(route);
+      return match;
+    }
+
+    // No routes in the subtree matched, so check this route.
+    params = Path.extractParams(route.path, pathname);
+
+    if (params)
+      return createMatch(route, params, pathname, query);
+  }
+
+  // No routes matched, so try the default route if there is one.
+  if (defaultRoute && (params = Path.extractParams(defaultRoute.path, pathname)))
+    return createMatch(defaultRoute, params, pathname, query);
+
+  // Last attempt: does the "not found" route match?
+  if (notFoundRoute && (params = Path.extractParams(notFoundRoute.path, pathname)))
+    return createMatch(notFoundRoute, params, pathname, query);
+
+  return null;
+}
+
+function hasProperties(object, properties) {
+  for (var propertyName in properties)
+    if (properties.hasOwnProperty(propertyName) && object[propertyName] !== properties[propertyName])
+      return false;
+
+  return true;
+}
+
+function hasMatch(routes, route, prevParams, nextParams, prevQuery, nextQuery) {
+  return routes.some(function (r) {
+    if (r !== route)
+      return false;
+
+    var paramNames = route.paramNames;
+    var paramName;
+
+    // Ensure that all params the route cares about did not change.
+    for (var i = 0, len = paramNames.length; i < len; ++i) {
+      paramName = paramNames[i];
+
+      if (nextParams[paramName] !== prevParams[paramName])
+        return false;
+    }
+
+    // Ensure the query hasn't changed.
+    return hasProperties(prevQuery, nextQuery) && hasProperties(nextQuery, prevQuery);
+  });
+}
+
+/**
+ * Creates and returns a new router using the given options. A router
+ * is a ReactComponent class that knows how to react to changes in the
+ * URL and keep the contents of the page in sync.
+ *
+ * Options may be any of the following:
+ *
+ * - routes           (required) The route config
+ * - location         The location to use. Defaults to HashLocation when
+ *                    the DOM is available, "/" otherwise
+ * - scrollBehavior   The scroll behavior to use. Defaults to ImitateBrowserBehavior
+ *                    when the DOM is available, null otherwise
+ * - onError          A function that is used to handle errors
+ * - onAbort          A function that is used to handle aborted transitions
+ *
+ * When rendering in a server-side environment, the location should simply
+ * be the URL path that was used in the request, including the query string.
+ */
+function createRouter(options) {
+  options = options || {};
+
+  if (isReactChildren(options))
+    options = { routes: options };
+
+  var mountedComponents = [];
+  var location = options.location || DEFAULT_LOCATION;
+  var scrollBehavior = options.scrollBehavior || DEFAULT_SCROLL_BEHAVIOR;
+  var state = {};
+  var nextState = {};
+  var pendingTransition = null;
+  var dispatchHandler = null;
+
+  if (typeof location === 'string') {
+    warning(
+      !canUseDOM || process.env.NODE_ENV === 'test',
+      'You should not use a static location in a DOM environment because ' +
+      'the router will not be kept in sync with the current URL'
+    );
+  } else {
+    invariant(
+      canUseDOM || location.needsDOM === false,
+      'You cannot use %s without a DOM',
+      location
+    );
+  }
+
+  // Automatically fall back to full page refreshes in
+  // browsers that don't support the HTML history API.
+  if (location === HistoryLocation && !supportsHistory())
+    location = RefreshLocation;
+
+  var Router = React.createClass({
+
+    displayName: 'Router',
+
+    statics: {
+
+      isRunning: false,
+
+      cancelPendingTransition: function () {
+        if (pendingTransition) {
+          pendingTransition.abort(new Cancellation);
+          pendingTransition = null;
+        }
+      },
+
+      clearAllRoutes: function () {
+        this.cancelPendingTransition();
+        this.defaultRoute = null;
+        this.notFoundRoute = null;
+        this.namedRoutes = {};
+        this.routes = [];
+      },
+
+      /**
+       * Adds routes to this router from the given children object (see ReactChildren).
+       */
+      addRoutes: function (routes) {
+        if (isReactChildren(routes))
+          routes = createRoutesFromReactChildren(routes, this, this.namedRoutes);
+
+        this.routes.push.apply(this.routes, routes);
+      },
+
+      /**
+       * Replaces routes of this router from the given children object (see ReactChildren).
+       */
+      replaceRoutes: function (routes) {
+        this.clearAllRoutes();
+        this.addRoutes(routes);
+        this.refresh();
+      },
+
+      /**
+       * Performs a match of the given path against this router and returns an object
+       * with the { routes, params, pathname, query } that match. Returns null if no
+       * match can be made.
+       */
+      match: function (path) {
+        return findMatch(this.routes, this.defaultRoute, this.notFoundRoute, Path.withoutQuery(path), Path.extractQuery(path));
+      },
+
+      /**
+       * Returns an absolute URL path created from the given route
+       * name, URL parameters, and query.
+       */
+      makePath: function (to, params, query) {
+        var path;
+        if (Path.isAbsolute(to)) {
+          path = Path.normalize(to);
+        } else {
+          var route = this.namedRoutes[to];
+
+          invariant(
+            route,
+            'Unable to find <Route name="%s">',
+            to
+          );
+
+          path = route.path;
+        }
+
+        return Path.withQuery(Path.injectParams(path, params), query);
+      },
+
+      /**
+       * Returns a string that may safely be used as the href of a link
+       * to the route with the given name, URL parameters, and query.
+       */
+      makeHref: function (to, params, query) {
+        var path = this.makePath(to, params, query);
+        return (location === HashLocation) ? '#' + path : path;
+      },
+
+      /**
+       * Transitions to the URL specified in the arguments by pushing
+       * a new URL onto the history stack.
+       */
+      transitionTo: function (to, params, query) {
+        invariant(
+          typeof location !== 'string',
+          'You cannot use transitionTo with a static location'
+        );
+
+        var path = this.makePath(to, params, query);
+
+        if (pendingTransition) {
+          // Replace so pending location does not stay in history.
+          location.replace(path);
+        } else {
+          location.push(path);
+        }
+      },
+
+      /**
+       * Transitions to the URL specified in the arguments by replacing
+       * the current URL in the history stack.
+       */
+      replaceWith: function (to, params, query) {
+        invariant(
+          typeof location !== 'string',
+          'You cannot use replaceWith with a static location'
+        );
+
+        location.replace(this.makePath(to, params, query));
+      },
+
+      /**
+       * Transitions to the previous URL if one is available. Returns true if the
+       * router was able to go back, false otherwise.
+       *
+       * Note: The router only tracks history entries in your application, not the
+       * current browser session, so you can safely call this function without guarding
+       * against sending the user back to some other site. However, when using
+       * RefreshLocation (which is the fallback for HistoryLocation in browsers that
+       * don't support HTML5 history) this method will *always* send the client back
+       * because we cannot reliably track history length.
+       */
+      goBack: function () {
+        invariant(
+          typeof location !== 'string',
+          'You cannot use goBack with a static location'
+        );
+
+        if (History.length > 1 || location === RefreshLocation) {
+          location.pop();
+          return true;
+        }
+
+        warning(false, 'goBack() was ignored because there is no router history');
+
+        return false;
+      },
+
+      handleAbort: options.onAbort || function (abortReason) {
+        if (typeof location === 'string')
+          throw new Error('Unhandled aborted transition! Reason: ' + abortReason);
+
+        if (abortReason instanceof Cancellation) {
+          return;
+        } else if (abortReason instanceof Redirect) {
+          location.replace(this.makePath(abortReason.to, abortReason.params, abortReason.query));
+        } else {
+          location.pop();
+        }
+      },
+
+      handleError: options.onError || function (error) {
+        // Throw so we don't silently swallow async errors.
+        throw error; // This error probably originated in a transition hook.
+      },
+
+      handleLocationChange: function (change) {
+        this.dispatch(change.path, change.type);
+      },
+
+      /**
+       * Performs a transition to the given path and calls callback(error, abortReason)
+       * when the transition is finished. If both arguments are null the router's state
+       * was updated. Otherwise the transition did not complete.
+       *
+       * In a transition, a router first determines which routes are involved by beginning
+       * with the current route, up the route tree to the first parent route that is shared
+       * with the destination route, and back down the tree to the destination route. The
+       * willTransitionFrom hook is invoked on all route handlers we're transitioning away
+       * from, in reverse nesting order. Likewise, the willTransitionTo hook is invoked on
+       * all route handlers we're transitioning to.
+       *
+       * Both willTransitionFrom and willTransitionTo hooks may either abort or redirect the
+       * transition. To resolve asynchronously, they may use the callback argument. If no
+       * hooks wait, the transition is fully synchronous.
+       */
+      dispatch: function (path, action) {
+        this.cancelPendingTransition();
+
+        var prevPath = state.path;
+        var isRefreshing = action == null;
+
+        if (prevPath === path && !isRefreshing)
+          return; // Nothing to do!
+
+        // Record the scroll position as early as possible to
+        // get it before browsers try update it automatically.
+        if (prevPath && action === LocationActions.PUSH)
+          this.recordScrollPosition(prevPath);
+
+        var match = this.match(path);
+
+        warning(
+          match != null,
+          'No route matches path "%s". Make sure you have <Route path="%s"> somewhere in your routes',
+          path, path
+        );
+
+        if (match == null)
+          match = {};
+
+        var prevRoutes = state.routes || [];
+        var prevParams = state.params || {};
+        var prevQuery = state.query || {};
+
+        var nextRoutes = match.routes || [];
+        var nextParams = match.params || {};
+        var nextQuery = match.query || {};
+
+        var fromRoutes, toRoutes;
+        if (prevRoutes.length) {
+          fromRoutes = prevRoutes.filter(function (route) {
+            return !hasMatch(nextRoutes, route, prevParams, nextParams, prevQuery, nextQuery);
+          });
+
+          toRoutes = nextRoutes.filter(function (route) {
+            return !hasMatch(prevRoutes, route, prevParams, nextParams, prevQuery, nextQuery);
+          });
+        } else {
+          fromRoutes = [];
+          toRoutes = nextRoutes;
+        }
+
+        var transition = new Transition(path, this.replaceWith.bind(this, path));
+        pendingTransition = transition;
+
+        var fromComponents = mountedComponents.slice(prevRoutes.length - fromRoutes.length);
+
+        transition.from(fromRoutes, fromComponents, function (error) {
+          if (error || transition.abortReason)
+            return dispatchHandler.call(Router, error, transition); // No need to continue.
+
+          transition.to(toRoutes, nextParams, nextQuery, function (error) {
+            dispatchHandler.call(Router, error, transition, {
+              path: path,
+              action: action,
+              pathname: match.pathname,
+              routes: nextRoutes,
+              params: nextParams,
+              query: nextQuery
+            });
+          });
+        });
+      },
+
+      /**
+       * Starts this router and calls callback(router, state) when the route changes.
+       *
+       * If the router's location is static (i.e. a URL path in a server environment)
+       * the callback is called only once. Otherwise, the location should be one of the
+       * Router.*Location objects (e.g. Router.HashLocation or Router.HistoryLocation).
+       */
+      run: function (callback) {
+        invariant(
+          !this.isRunning,
+          'Router is already running'
+        );
+
+        dispatchHandler = function (error, transition, newState) {
+          if (error)
+            Router.handleError(error);
+
+          if (pendingTransition !== transition)
+            return;
+
+          pendingTransition = null;
+
+          if (transition.abortReason) {
+            Router.handleAbort(transition.abortReason);
+          } else {
+            callback.call(this, this, nextState = newState);
+          }
+        };
+
+        if (typeof location === 'string') {
+          Router.dispatch(location, null);
+        } else {
+          if (location.addChangeListener)
+            location.addChangeListener(Router.handleLocationChange);
+
+          this.isRunning = true;
+
+          // Bootstrap using the current path.
+          this.refresh();
+        }
+      },
+
+      refresh: function () {
+        Router.dispatch(location.getCurrentPath(), null);
+      },
+
+      stop: function () {
+        this.cancelPendingTransition();
+
+        if (location.removeChangeListener)
+          location.removeChangeListener(Router.handleLocationChange);
+
+        this.isRunning = false;
+      }
+
+    },
+
+    mixins: [ NavigationContext, StateContext, Scrolling ],
+
+    propTypes: {
+      children: PropTypes.falsy
+    },
+
+    childContextTypes: {
+      getRouteAtDepth: React.PropTypes.func.isRequired,
+      setRouteComponentAtDepth: React.PropTypes.func.isRequired,
+      routeHandlers: React.PropTypes.array.isRequired
+    },
+
+    getChildContext: function () {
+      return {
+        getRouteAtDepth: this.getRouteAtDepth,
+        setRouteComponentAtDepth: this.setRouteComponentAtDepth,
+        routeHandlers: [ this ]
+      };
+    },
+
+    getInitialState: function () {
+      return (state = nextState);
+    },
+
+    componentWillReceiveProps: function () {
+      this.setState(state = nextState);
+    },
+
+    componentWillUnmount: function () {
+      Router.stop();
+    },
+
+    getLocation: function () {
+      return location;
+    },
+
+    getScrollBehavior: function () {
+      return scrollBehavior;
+    },
+
+    getRouteAtDepth: function (depth) {
+      var routes = this.state.routes;
+      return routes && routes[depth];
+    },
+
+    setRouteComponentAtDepth: function (depth, component) {
+      mountedComponents[depth] = component;
+    },
+
+    render: function () {
+      var route = this.getRouteAtDepth(0);
+      return route ? React.createElement(route.handler, this.props) : null;
+    }
+
+  });
+
+  Router.clearAllRoutes();
+
+  if (options.routes)
+    Router.addRoutes(options.routes);
+
+  return Router;
+}
+
+module.exports = createRouter;
+
+}).call(this,require('_process'))
+},{"./Cancellation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Cancellation.js","./History":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\History.js","./NavigationContext":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\NavigationContext.js","./PropTypes":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\PropTypes.js","./Redirect":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Redirect.js","./Routing":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Routing.js","./Scrolling":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Scrolling.js","./StateContext":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\StateContext.js","./Transition":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Transition.js","./actions/LocationActions":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\actions\\LocationActions.js","./behaviors/ImitateBrowserBehavior":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\behaviors\\ImitateBrowserBehavior.js","./isReactChildren":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\isReactChildren.js","./locations/HashLocation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\HashLocation.js","./locations/HistoryLocation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\HistoryLocation.js","./locations/RefreshLocation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\RefreshLocation.js","./utils/Path":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Path.js","./utils/supportsHistory":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\supportsHistory.js","_process":"C:\\Users\\Isaac\\AppData\\Roaming\\npm\\node_modules\\watchify\\node_modules\\browserify\\node_modules\\process\\browser.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react/lib/ExecutionEnvironment":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\ExecutionEnvironment.js","react/lib/invariant":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\invariant.js","react/lib/warning":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\warning.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\index.js":[function(require,module,exports){
+exports.DefaultRoute = require('./components/DefaultRoute');
+exports.Link = require('./components/Link');
+exports.NotFoundRoute = require('./components/NotFoundRoute');
+exports.Redirect = require('./components/Redirect');
+exports.Route = require('./components/Route');
+exports.RouteHandler = require('./components/RouteHandler');
+
+exports.HashLocation = require('./locations/HashLocation');
+exports.HistoryLocation = require('./locations/HistoryLocation');
+exports.RefreshLocation = require('./locations/RefreshLocation');
+
+exports.ImitateBrowserBehavior = require('./behaviors/ImitateBrowserBehavior');
+exports.ScrollToTopBehavior = require('./behaviors/ScrollToTopBehavior');
+
+exports.History = require('./History');
+exports.Navigation = require('./Navigation');
+exports.RouteHandlerMixin = require('./RouteHandlerMixin');
+exports.State = require('./State');
+
+exports.create = require('./createRouter');
+exports.run = require('./runRouter');
+
+
+},{"./History":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\History.js","./Navigation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\Navigation.js","./RouteHandlerMixin":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\RouteHandlerMixin.js","./State":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\State.js","./behaviors/ImitateBrowserBehavior":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\behaviors\\ImitateBrowserBehavior.js","./behaviors/ScrollToTopBehavior":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\behaviors\\ScrollToTopBehavior.js","./components/DefaultRoute":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\DefaultRoute.js","./components/Link":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\Link.js","./components/NotFoundRoute":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\NotFoundRoute.js","./components/Redirect":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\Redirect.js","./components/Route":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\Route.js","./components/RouteHandler":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\RouteHandler.js","./createRouter":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\createRouter.js","./locations/HashLocation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\HashLocation.js","./locations/HistoryLocation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\HistoryLocation.js","./locations/RefreshLocation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\RefreshLocation.js","./runRouter":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\runRouter.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\isReactChildren.js":[function(require,module,exports){
+var React = require('react');
+
+function isValidChild(object) {
+  return object == null || React.isValidElement(object);
+}
+
+function isReactChildren(object) {
+  return isValidChild(object) || (Array.isArray(object) && object.every(isValidChild));
+}
+
+module.exports = isReactChildren;
+
+},{"react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\HashLocation.js":[function(require,module,exports){
+var LocationActions = require('../actions/LocationActions');
+var History = require('../History');
+
+/**
+ * Returns the current URL path from the `hash` portion of the URL, including
+ * query string.
+ */
+function getHashPath() {
+  return decodeURI(
+    // We can't use window.location.hash here because it's not
+    // consistent across browsers - Firefox will pre-decode it!
+    window.location.href.split('#')[1] || ''
+  );
+}
+
+var _actionType;
+
+function ensureSlash() {
+  var path = getHashPath();
+
+  if (path.charAt(0) === '/')
+    return true;
+
+  HashLocation.replace('/' + path);
+
+  return false;
+}
+
+var _changeListeners = [];
+
+function notifyChange(type) {
+  if (type === LocationActions.PUSH)
+    History.length += 1;
+
+  var change = {
+    path: getHashPath(),
+    type: type
+  };
+
+  _changeListeners.forEach(function (listener) {
+    listener(change);
+  });
+}
+
+var _isListening = false;
+
+function onHashChange() {
+  if (ensureSlash()) {
+    // If we don't have an _actionType then all we know is the hash
+    // changed. It was probably caused by the user clicking the Back
+    // button, but may have also been the Forward button or manual
+    // manipulation. So just guess 'pop'.
+    notifyChange(_actionType || LocationActions.POP);
+    _actionType = null;
+  }
+}
+
+/**
+ * A Location that uses `window.location.hash`.
+ */
+var HashLocation = {
+
+  addChangeListener: function (listener) {
+    _changeListeners.push(listener);
+
+    // Do this BEFORE listening for hashchange.
+    ensureSlash();
+
+    if (!_isListening) {
+      if (window.addEventListener) {
+        window.addEventListener('hashchange', onHashChange, false);
+      } else {
+        window.attachEvent('onhashchange', onHashChange);
+      }
+
+      _isListening = true;
+    }
+  },
+
+  removeChangeListener: function(listener) {
+    _changeListeners = _changeListeners.filter(function (l) {
+      return l !== listener;
+    });
+
+    if (_changeListeners.length === 0) {
+      if (window.removeEventListener) {
+        window.removeEventListener('hashchange', onHashChange, false);
+      } else {
+        window.removeEvent('onhashchange', onHashChange);
+      }
+
+      _isListening = false;
+    }
+  },
+
+  push: function (path) {
+    _actionType = LocationActions.PUSH;
+    window.location.hash = encodeURI(path);
+  },
+
+  replace: function (path) {
+    _actionType = LocationActions.REPLACE;
+    window.location.replace(
+      window.location.pathname + window.location.search + '#' + encodeURI(path)
+    );
+  },
+
+  pop: function () {
+    _actionType = LocationActions.POP;
+    History.back();
+  },
+
+  getCurrentPath: getHashPath,
+
+  toString: function () {
+    return '<HashLocation>';
+  }
+
+};
+
+module.exports = HashLocation;
+
+},{"../History":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\History.js","../actions/LocationActions":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\actions\\LocationActions.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\HistoryLocation.js":[function(require,module,exports){
+var LocationActions = require('../actions/LocationActions');
+var History = require('../History');
+
+/**
+ * Returns the current URL path from `window.location`, including query string.
+ */
+function getWindowPath() {
+  return decodeURI(
+    window.location.pathname + window.location.search
+  );
+}
+
+var _changeListeners = [];
+
+function notifyChange(type) {
+  var change = {
+    path: getWindowPath(),
+    type: type
+  };
+
+  _changeListeners.forEach(function (listener) {
+    listener(change);
+  });
+}
+
+var _isListening = false;
+
+function onPopState() {
+  notifyChange(LocationActions.POP);
+}
+
+/**
+ * A Location that uses HTML5 history.
+ */
+var HistoryLocation = {
+
+  addChangeListener: function (listener) {
+    _changeListeners.push(listener);
+
+    if (!_isListening) {
+      if (window.addEventListener) {
+        window.addEventListener('popstate', onPopState, false);
+      } else {
+        window.attachEvent('popstate', onPopState);
+      }
+
+      _isListening = true;
+    }
+  },
+
+  removeChangeListener: function(listener) {
+    _changeListeners = _changeListeners.filter(function (l) {
+      return l !== listener;
+    });
+
+    if (_changeListeners.length === 0) {
+      if (window.addEventListener) {
+        window.removeEventListener('popstate', onPopState);
+      } else {
+        window.removeEvent('popstate', onPopState);
+      }
+
+      _isListening = false;
+    }
+  },
+
+  push: function (path) {
+    window.history.pushState({ path: path }, '', encodeURI(path));
+    History.length += 1;
+    notifyChange(LocationActions.PUSH);
+  },
+
+  replace: function (path) {
+    window.history.replaceState({ path: path }, '', encodeURI(path));
+    notifyChange(LocationActions.REPLACE);
+  },
+
+  pop: History.back,
+
+  getCurrentPath: getWindowPath,
+
+  toString: function () {
+    return '<HistoryLocation>';
+  }
+
+};
+
+module.exports = HistoryLocation;
+
+},{"../History":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\History.js","../actions/LocationActions":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\actions\\LocationActions.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\RefreshLocation.js":[function(require,module,exports){
+var HistoryLocation = require('./HistoryLocation');
+var History = require('../History');
+
+/**
+ * A Location that uses full page refreshes. This is used as
+ * the fallback for HistoryLocation in browsers that do not
+ * support the HTML5 history API.
+ */
+var RefreshLocation = {
+
+  push: function (path) {
+    window.location = encodeURI(path);
+  },
+
+  replace: function (path) {
+    window.location.replace(encodeURI(path));
+  },
+
+  pop: History.back,
+
+  getCurrentPath: HistoryLocation.getCurrentPath,
+
+  toString: function () {
+    return '<RefreshLocation>';
+  }
+
+};
+
+module.exports = RefreshLocation;
+
+},{"../History":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\History.js","./HistoryLocation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\HistoryLocation.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\runRouter.js":[function(require,module,exports){
+var createRouter = require('./createRouter');
+
+/**
+ * A high-level convenience method that creates, configures, and
+ * runs a router in one shot. The method signature is:
+ *
+ *   Router.run(routes[, location ], callback);
+ *
+ * Using `window.location.hash` to manage the URL, you could do:
+ *
+ *   Router.run(routes, function (Handler) {
+ *     React.render(<Handler/>, document.body);
+ *   });
+ * 
+ * Using HTML5 history and a custom "cursor" prop:
+ * 
+ *   Router.run(routes, Router.HistoryLocation, function (Handler) {
+ *     React.render(<Handler cursor={cursor}/>, document.body);
+ *   });
+ *
+ * Returns the newly created router.
+ *
+ * Note: If you need to specify further options for your router such
+ * as error/abort handling or custom scroll behavior, use Router.create
+ * instead.
+ *
+ *   var router = Router.create(options);
+ *   router.run(function (Handler) {
+ *     // ...
+ *   });
+ */
+function runRouter(routes, location, callback) {
+  if (typeof location === 'function') {
+    callback = location;
+    location = null;
+  }
+
+  var router = createRouter({
+    routes: routes,
+    location: location
+  });
+
+  router.run(callback);
+
+  return router;
+}
+
+module.exports = runRouter;
+
+},{"./createRouter":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\createRouter.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Path.js":[function(require,module,exports){
 var invariant = require('react/lib/invariant');
 var merge = require('qs/lib/utils').merge;
 var qs = require('qs');
 
 var paramCompileMatcher = /:([a-zA-Z_$][a-zA-Z0-9_$]*)|[*.()\[\]\\+|{}^$]/g;
 var paramInjectMatcher = /:([a-zA-Z_$][a-zA-Z0-9_$?]*[?]?)|[*]/g;
-var paramInjectTrailingSlashMatcher = /\/\/\?|\/\?/g;
+var paramInjectTrailingSlashMatcher = /\/\/\?|\/\?\/|\/\?/g;
 var queryMatcher = /\?(.+)/;
 
 var _compiledPatterns = {};
@@ -8792,20 +19006,6 @@ function compilePattern(pattern) {
 }
 
 var Path = {
-
-  /**
-   * Safely decodes special characters in the given URL path.
-   */
-  decode: function (path) {
-    return decodeURI(path.replace(/\+/g, ' '));
-  },
-
-  /**
-   * Safely encodes special characters in the given URL path.
-   */
-  encode: function (path) {
-    return encodeURI(path).replace(/%20/g, '+');
-  },
 
   /**
    * Returns an array of the names of all parameters in the given pattern.
@@ -8902,10 +19102,10 @@ var Path = {
     if (existingQuery)
       query = query ? merge(existingQuery, query) : existingQuery;
 
-    var queryString = query && qs.stringify(query);
+    var queryString = qs.stringify(query, { indices: false });
 
     if (queryString)
-      return Path.withoutQuery(path) + '?' + queryString;
+      return Path.withoutQuery(path) + '?' + decodeURIComponent(queryString);
 
     return path;
   },
@@ -8935,838 +19135,7 @@ var Path = {
 
 module.exports = Path;
 
-},{"qs":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\qs\\index.js","qs/lib/utils":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\qs\\lib\\utils.js","react/lib/invariant":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\invariant.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Promise.js":[function(require,module,exports){
-var Promise = require('when/lib/Promise');
-
-// TODO: Use process.env.NODE_ENV check + envify to enable
-// when's promise monitor here when in dev.
-
-module.exports = Promise;
-
-},{"when/lib/Promise":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\when\\lib\\Promise.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\PropTypes.js":[function(require,module,exports){
-var PropTypes = {
-
-  /**
-   * Requires that the value of a prop be falsy.
-   */
-  falsy: function (props, propName, componentName) {
-    if (props[propName])
-      return new Error('<' + componentName + '> may not have a "' + propName + '" prop');
-  }
-
-};
-
-module.exports = PropTypes;
-
-},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Redirect.js":[function(require,module,exports){
-/**
- * Encapsulates a redirect to the given route.
- */
-function Redirect(to, params, query) {
-  this.to = to;
-  this.params = params;
-  this.query = query;
-}
-
-module.exports = Redirect;
-
-},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Transition.js":[function(require,module,exports){
-var assign = require('react/lib/Object.assign');
-var reversedArray = require('./reversedArray');
-var Redirect = require('./Redirect');
-var Promise = require('./Promise');
-
-/**
- * Runs all hook functions serially and calls callback(error) when finished.
- * A hook may return a promise if it needs to execute asynchronously.
- */
-function runHooks(hooks, callback) {
-  var promise;
-  try {
-    promise = hooks.reduce(function (promise, hook) {
-      // The first hook to use transition.wait makes the rest
-      // of the transition async from that point forward.
-      return promise ? promise.then(hook) : hook();
-    }, null);
-  } catch (error) {
-    return callback(error); // Sync error.
-  }
-
-  if (promise) {
-    // Use setTimeout to break the promise chain.
-    promise.then(function () {
-      setTimeout(callback);
-    }, function (error) {
-      setTimeout(function () {
-        callback(error);
-      });
-    });
-  } else {
-    callback();
-  }
-}
-
-/**
- * Calls the willTransitionFrom hook of all handlers in the given matches
- * serially in reverse with the transition object and the current instance of
- * the route's handler, so that the deepest nested handlers are called first.
- * Calls callback(error) when finished.
- */
-function runTransitionFromHooks(transition, routes, components, callback) {
-  components = reversedArray(components);
-
-  var hooks = reversedArray(routes).map(function (route, index) {
-    return function () {
-      var handler = route.handler;
-
-      if (!transition.isAborted && handler.willTransitionFrom)
-        return handler.willTransitionFrom(transition, components[index]);
-
-      var promise = transition._promise;
-      transition._promise = null;
-
-      return promise;
-    };
-  });
-
-  runHooks(hooks, callback);
-}
-
-/**
- * Calls the willTransitionTo hook of all handlers in the given matches
- * serially with the transition object and any params that apply to that
- * handler. Calls callback(error) when finished.
- */
-function runTransitionToHooks(transition, routes, params, query, callback) {
-  var hooks = routes.map(function (route) {
-    return function () {
-      var handler = route.handler;
-
-      if (!transition.isAborted && handler.willTransitionTo)
-        handler.willTransitionTo(transition, params, query);
-
-      var promise = transition._promise;
-      transition._promise = null;
-
-      return promise;
-    };
-  });
-
-  runHooks(hooks, callback);
-}
-
-/**
- * Encapsulates a transition to a given path.
- *
- * The willTransitionTo and willTransitionFrom handlers receive
- * an instance of this class as their first argument.
- */
-function Transition(path, retry) {
-  this.path = path;
-  this.abortReason = null;
-  this.isAborted = false;
-  this.retry = retry.bind(this);
-  this._promise = null;
-}
-
-assign(Transition.prototype, {
-
-  abort: function (reason) {
-    if (this.isAborted) {
-      // First abort wins.
-      return;
-    }
-
-    this.abortReason = reason;
-    this.isAborted = true;
-  },
-
-  redirect: function (to, params, query) {
-    this.abort(new Redirect(to, params, query));
-  },
-
-  wait: function (value) {
-    this._promise = Promise.resolve(value);
-  },
-
-  from: function (routes, components, callback) {
-    return runTransitionFromHooks(this, routes, components, callback);
-  },
-
-  to: function (routes, params, query, callback) {
-    return runTransitionToHooks(this, routes, params, query, callback);
-  }
-
-});
-
-module.exports = Transition;
-
-},{"./Promise":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Promise.js","./Redirect":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Redirect.js","./reversedArray":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\reversedArray.js","react/lib/Object.assign":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\Object.assign.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\createRouter.js":[function(require,module,exports){
-(function (process){
-/* jshint -W058 */
-var React = require('react');
-var warning = require('react/lib/warning');
-var invariant = require('react/lib/invariant');
-var canUseDOM = require('react/lib/ExecutionEnvironment').canUseDOM;
-var ImitateBrowserBehavior = require('../behaviors/ImitateBrowserBehavior');
-var RouteHandler = require('../components/RouteHandler');
-var LocationActions = require('../actions/LocationActions');
-var HashLocation = require('../locations/HashLocation');
-var HistoryLocation = require('../locations/HistoryLocation');
-var RefreshLocation = require('../locations/RefreshLocation');
-var NavigationContext = require('../mixins/NavigationContext');
-var StateContext = require('../mixins/StateContext');
-var Scrolling = require('../mixins/Scrolling');
-var createRoutesFromChildren = require('./createRoutesFromChildren');
-var supportsHistory = require('./supportsHistory');
-var Transition = require('./Transition');
-var PropTypes = require('./PropTypes');
-var Redirect = require('./Redirect');
-var History = require('./History');
-var Cancellation = require('./Cancellation');
-var Path = require('./Path');
-
-/**
- * The default location for new routers.
- */
-var DEFAULT_LOCATION = canUseDOM ? HashLocation : '/';
-
-/**
- * The default scroll behavior for new routers.
- */
-var DEFAULT_SCROLL_BEHAVIOR = canUseDOM ? ImitateBrowserBehavior : null;
-
-/**
- * The default error handler for new routers.
- */
-function defaultErrorHandler(error) {
-  // Throw so we don't silently swallow async errors.
-  throw error; // This error probably originated in a transition hook.
-}
-
-/**
- * The default aborted transition handler for new routers.
- */
-function defaultAbortHandler(abortReason, location) {
-  if (typeof location === 'string')
-    throw new Error('Unhandled aborted transition! Reason: ' + abortReason);
-
-  if (abortReason instanceof Cancellation) {
-    return;
-  } else if (abortReason instanceof Redirect) {
-    location.replace(this.makePath(abortReason.to, abortReason.params, abortReason.query));
-  } else {
-    location.pop();
-  }
-}
-
-function findMatch(pathname, routes, defaultRoute, notFoundRoute) {
-  var match, route, params;
-
-  for (var i = 0, len = routes.length; i < len; ++i) {
-    route = routes[i];
-
-    // Check the subtree first to find the most deeply-nested match.
-    match = findMatch(pathname, route.childRoutes, route.defaultRoute, route.notFoundRoute);
-
-    if (match != null) {
-      match.routes.unshift(route);
-      return match;
-    }
-
-    // No routes in the subtree matched, so check this route.
-    params = Path.extractParams(route.path, pathname);
-
-    if (params)
-      return createMatch(route, params);
-  }
-
-  // No routes matched, so try the default route if there is one.
-  if (defaultRoute && (params = Path.extractParams(defaultRoute.path, pathname)))
-    return createMatch(defaultRoute, params);
-
-  // Last attempt: does the "not found" route match?
-  if (notFoundRoute && (params = Path.extractParams(notFoundRoute.path, pathname)))
-    return createMatch(notFoundRoute, params);
-
-  return match;
-}
-
-function createMatch(route, params) {
-  return { routes: [ route ], params: params };
-}
-
-function hasProperties(object, properties) {
-  for (var propertyName in properties)
-    if (properties.hasOwnProperty(propertyName) && object[propertyName] !== properties[propertyName])
-      return false;
-
-  return true;
-}
-
-function hasMatch(routes, route, prevParams, nextParams, prevQuery, nextQuery) {
-  return routes.some(function (r) {
-    if (r !== route)
-      return false;
-
-    var paramNames = route.paramNames;
-    var paramName;
-
-    // Ensure that all params the route cares about did not change.
-    for (var i = 0, len = paramNames.length; i < len; ++i) {
-      paramName = paramNames[i];
-
-      if (nextParams[paramName] !== prevParams[paramName])
-        return false;
-    }
-
-    // Ensure the query hasn't changed.
-    return hasProperties(prevQuery, nextQuery) && hasProperties(nextQuery, prevQuery);
-  });
-}
-
-/**
- * Creates and returns a new router using the given options. A router
- * is a ReactComponent class that knows how to react to changes in the
- * URL and keep the contents of the page in sync.
- *
- * Options may be any of the following:
- *
- * - routes           (required) The route config
- * - location         The location to use. Defaults to HashLocation when
- *                    the DOM is available, "/" otherwise
- * - scrollBehavior   The scroll behavior to use. Defaults to ImitateBrowserBehavior
- *                    when the DOM is available, null otherwise
- * - onError          A function that is used to handle errors
- * - onAbort          A function that is used to handle aborted transitions
- *
- * When rendering in a server-side environment, the location should simply
- * be the URL path that was used in the request, including the query string.
- */
-function createRouter(options) {
-  options = options || {};
-
-  if (typeof options === 'function') {
-    options = { routes: options }; // Router.create(<Route>)
-  } else if (Array.isArray(options)) {
-    options = { routes: options }; // Router.create([ <Route>, <Route> ])
-  }
-
-  var routes = [];
-  var namedRoutes = {};
-  var components = [];
-  var location = options.location || DEFAULT_LOCATION;
-  var scrollBehavior = options.scrollBehavior || DEFAULT_SCROLL_BEHAVIOR;
-  var onError = options.onError || defaultErrorHandler;
-  var onAbort = options.onAbort || defaultAbortHandler;
-  var state = {};
-  var nextState = {};
-  var pendingTransition = null;
-
-  function updateState() {
-    state = nextState;
-    nextState = {};
-  }
-
-  if (typeof location === 'string') {
-    warning(
-      !canUseDOM || process.env.NODE_ENV === 'test',
-      'You should not use a static location in a DOM environment because ' +
-      'the router will not be kept in sync with the current URL'
-    );
-  } else {
-    invariant(
-      canUseDOM,
-      'You cannot use %s without a DOM',
-      location
-    );
-  }
-
-  // Automatically fall back to full page refreshes in
-  // browsers that don't support the HTML history API.
-  if (location === HistoryLocation && !supportsHistory())
-    location = RefreshLocation;
-
-  var router = React.createClass({
-
-    displayName: 'Router',
-
-    mixins: [ NavigationContext, StateContext, Scrolling ],
-
-    statics: {
-
-      defaultRoute: null,
-      notFoundRoute: null,
-
-      /**
-       * Adds routes to this router from the given children object (see ReactChildren).
-       */
-      addRoutes: function (children) {
-        routes.push.apply(routes, createRoutesFromChildren(children, this, namedRoutes));
-      },
-
-      /**
-       * Returns an absolute URL path created from the given route
-       * name, URL parameters, and query.
-       */
-      makePath: function (to, params, query) {
-        var path;
-        if (Path.isAbsolute(to)) {
-          path = Path.normalize(to);
-        } else {
-          var route = namedRoutes[to];
-
-          invariant(
-            route,
-            'Unable to find <Route name="%s">',
-            to
-          );
-
-          path = route.path;
-        }
-
-        return Path.withQuery(Path.injectParams(path, params), query);
-      },
-
-      /**
-       * Returns a string that may safely be used as the href of a link
-       * to the route with the given name, URL parameters, and query.
-       */
-      makeHref: function (to, params, query) {
-        var path = this.makePath(to, params, query);
-        return (location === HashLocation) ? '#' + path : path;
-      },
-
-      /**
-       * Transitions to the URL specified in the arguments by pushing
-       * a new URL onto the history stack.
-       */
-      transitionTo: function (to, params, query) {
-        invariant(
-          typeof location !== 'string',
-          'You cannot use transitionTo with a static location'
-        );
-
-        var path = this.makePath(to, params, query);
-
-        if (pendingTransition) {
-          // Replace so pending location does not stay in history.
-          location.replace(path);
-        } else {
-          location.push(path);
-        }
-      },
-
-      /**
-       * Transitions to the URL specified in the arguments by replacing
-       * the current URL in the history stack.
-       */
-      replaceWith: function (to, params, query) {
-        invariant(
-          typeof location !== 'string',
-          'You cannot use replaceWith with a static location'
-        );
-
-        location.replace(this.makePath(to, params, query));
-      },
-
-      /**
-       * Transitions to the previous URL if one is available. Returns true if the
-       * router was able to go back, false otherwise.
-       *
-       * Note: The router only tracks history entries in your application, not the
-       * current browser session, so you can safely call this function without guarding
-       * against sending the user back to some other site. However, when using
-       * RefreshLocation (which is the fallback for HistoryLocation in browsers that
-       * don't support HTML5 history) this method will *always* send the client back
-       * because we cannot reliably track history length.
-       */
-      goBack: function () {
-        invariant(
-          typeof location !== 'string',
-          'You cannot use goBack with a static location'
-        );
-
-        if (History.length > 1 || location === RefreshLocation) {
-          location.pop();
-          return true;
-        }
-
-        warning(false, 'goBack() was ignored because there is no router history');
-
-        return false;
-      },
-
-      /**
-       * Performs a match of the given pathname against this router and returns an object
-       * with the { routes, params } that match. Returns null if no match can be made.
-       */
-      match: function (pathname) {
-        return findMatch(pathname, routes, this.defaultRoute, this.notFoundRoute) || null;
-      },
-
-      /**
-       * Performs a transition to the given path and calls callback(error, abortReason)
-       * when the transition is finished. If both arguments are null the router's state
-       * was updated. Otherwise the transition did not complete.
-       *
-       * In a transition, a router first determines which routes are involved by beginning
-       * with the current route, up the route tree to the first parent route that is shared
-       * with the destination route, and back down the tree to the destination route. The
-       * willTransitionFrom hook is invoked on all route handlers we're transitioning away
-       * from, in reverse nesting order. Likewise, the willTransitionTo hook is invoked on
-       * all route handlers we're transitioning to.
-       *
-       * Both willTransitionFrom and willTransitionTo hooks may either abort or redirect the
-       * transition. To resolve asynchronously, they may use transition.wait(promise). If no
-       * hooks wait, the transition is fully synchronous.
-       */
-      dispatch: function (path, action, callback) {
-        if (pendingTransition) {
-          pendingTransition.abort(new Cancellation);
-          pendingTransition = null;
-        }
-
-        var prevPath = state.path;
-        if (prevPath === path)
-          return; // Nothing to do!
-
-        // Record the scroll position as early as possible to
-        // get it before browsers try update it automatically.
-        if (prevPath && action !== LocationActions.REPLACE)
-          this.recordScrollPosition(prevPath);
-
-        var pathname = Path.withoutQuery(path);
-        var match = this.match(pathname);
-
-        warning(
-          match != null,
-          'No route matches path "%s". Make sure you have <Route path="%s"> somewhere in your routes',
-          path, path
-        );
-
-        if (match == null)
-          match = {};
-
-        var prevRoutes = state.routes || [];
-        var prevParams = state.params || {};
-        var prevQuery = state.query || {};
-
-        var nextRoutes = match.routes || [];
-        var nextParams = match.params || {};
-        var nextQuery = Path.extractQuery(path) || {};
-
-        var fromRoutes, toRoutes;
-        if (prevRoutes.length) {
-          fromRoutes = prevRoutes.filter(function (route) {
-            return !hasMatch(nextRoutes, route, prevParams, nextParams, prevQuery, nextQuery);
-          });
-
-          toRoutes = nextRoutes.filter(function (route) {
-            return !hasMatch(prevRoutes, route, prevParams, nextParams, prevQuery, nextQuery);
-          });
-        } else {
-          fromRoutes = [];
-          toRoutes = nextRoutes;
-        }
-
-        var transition = new Transition(path, this.replaceWith.bind(this, path));
-        pendingTransition = transition;
-
-        transition.from(fromRoutes, components, function (error) {
-          if (error || transition.isAborted)
-            return callback.call(router, error, transition);
-
-          transition.to(toRoutes, nextParams, nextQuery, function (error) {
-            if (error || transition.isAborted)
-              return callback.call(router, error, transition);
-
-            nextState.path = path;
-            nextState.action = action;
-            nextState.pathname = pathname;
-            nextState.routes = nextRoutes;
-            nextState.params = nextParams;
-            nextState.query = nextQuery;
-
-            callback.call(router, null, transition);
-          });
-        });
-      },
-
-      /**
-       * Starts this router and calls callback(router, state) when the route changes.
-       *
-       * If the router's location is static (i.e. a URL path in a server environment)
-       * the callback is called only once. Otherwise, the location should be one of the
-       * Router.*Location objects (e.g. Router.HashLocation or Router.HistoryLocation).
-       */
-      run: function (callback) {
-        var dispatchHandler = function (error, transition) {
-          pendingTransition = null;
-
-          if (error) {
-            onError.call(router, error);
-          } else if (transition.isAborted) {
-            onAbort.call(router, transition.abortReason, location);
-          } else {
-            callback.call(router, router, nextState);
-          }
-        };
-
-        if (typeof location === 'string') {
-          router.dispatch(location, null, dispatchHandler);
-        } else {
-          // Listen for changes to the location.
-          var changeListener = function (change) {
-            router.dispatch(change.path, change.type, dispatchHandler);
-          };
-
-          if (location.addChangeListener)
-            location.addChangeListener(changeListener);
-
-          // Bootstrap using the current path.
-          router.dispatch(location.getCurrentPath(), null, dispatchHandler);
-        }
-      },
-
-      teardown: function() {
-        location.removeChangeListener(this.changeListener);
-      }
-
-    },
-
-    propTypes: {
-      children: PropTypes.falsy
-    },
-
-    getLocation: function () {
-      return location;
-    },
-
-    getScrollBehavior: function () {
-      return scrollBehavior;
-    },
-
-    getRouteAtDepth: function (depth) {
-      var routes = this.state.routes;
-      return routes && routes[depth];
-    },
-
-    getRouteComponents: function () {
-      return components;
-    },
-
-    getInitialState: function () {
-      updateState();
-      return state;
-    },
-
-    componentWillReceiveProps: function () {
-      updateState();
-      this.setState(state);
-    },
-
-    componentWillUnmount: function() {
-      router.teardown();
-    },
-
-    render: function () {
-      return this.getRouteAtDepth(0) ? React.createElement(RouteHandler, this.props) : null;
-    },
-
-    childContextTypes: {
-      getRouteAtDepth: React.PropTypes.func.isRequired,
-      getRouteComponents: React.PropTypes.func.isRequired,
-      routeHandlers: React.PropTypes.array.isRequired
-    },
-
-    getChildContext: function () {
-      return {
-        getRouteComponents: this.getRouteComponents,
-        getRouteAtDepth: this.getRouteAtDepth,
-        routeHandlers: [ this ]
-      };
-    }
-
-  });
-
-  if (options.routes)
-    router.addRoutes(options.routes);
-
-  return router;
-}
-
-module.exports = createRouter;
-
-}).call(this,require('_process'))
-},{"../actions/LocationActions":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\actions\\LocationActions.js","../behaviors/ImitateBrowserBehavior":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\behaviors\\ImitateBrowserBehavior.js","../components/RouteHandler":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\RouteHandler.js","../locations/HashLocation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\HashLocation.js","../locations/HistoryLocation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\HistoryLocation.js","../locations/RefreshLocation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\locations\\RefreshLocation.js","../mixins/NavigationContext":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\NavigationContext.js","../mixins/Scrolling":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\Scrolling.js","../mixins/StateContext":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\mixins\\StateContext.js","./Cancellation":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Cancellation.js","./History":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\History.js","./Path":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Path.js","./PropTypes":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\PropTypes.js","./Redirect":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Redirect.js","./Transition":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Transition.js","./createRoutesFromChildren":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\createRoutesFromChildren.js","./supportsHistory":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\supportsHistory.js","_process":"C:\\Users\\Isaac\\AppData\\Roaming\\npm\\node_modules\\watchify\\node_modules\\browserify\\node_modules\\process\\browser.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react/lib/ExecutionEnvironment":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\ExecutionEnvironment.js","react/lib/invariant":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\invariant.js","react/lib/warning":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\warning.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\createRoutesFromChildren.js":[function(require,module,exports){
-/* jshint -W084 */
-var React = require('react');
-var warning = require('react/lib/warning');
-var invariant = require('react/lib/invariant');
-var DefaultRoute = require('../components/DefaultRoute');
-var NotFoundRoute = require('../components/NotFoundRoute');
-var Redirect = require('../components/Redirect');
-var Route = require('../components/Route');
-var Path = require('./Path');
-
-var CONFIG_ELEMENT_TYPES = [
-  DefaultRoute.type,
-  NotFoundRoute.type,
-  Redirect.type,
-  Route.type
-];
-
-function createRedirectHandler(to, _params, _query) {
-  return React.createClass({
-    statics: {
-      willTransitionTo: function (transition, params, query) {
-        transition.redirect(to, _params || params, _query || query);
-      }
-    },
-
-    render: function () {
-      return null;
-    }
-  });
-}
-
-function checkPropTypes(componentName, propTypes, props) {
-  for (var propName in propTypes) {
-    if (propTypes.hasOwnProperty(propName)) {
-      var error = propTypes[propName](props, propName, componentName);
-
-      if (error instanceof Error)
-        warning(false, error.message);
-    }
-  }
-}
-
-function createRoute(element, parentRoute, namedRoutes) {
-  var type = element.type;
-  var props = element.props;
-  var componentName = (type && type.displayName) || 'UnknownComponent';
-
-  invariant(
-    CONFIG_ELEMENT_TYPES.indexOf(type) !== -1,
-    'Unrecognized route configuration element "<%s>"',
-    componentName
-  );
-
-  if (type.propTypes)
-    checkPropTypes(componentName, type.propTypes, props);
-
-  var route = { name: props.name };
-
-  if (props.ignoreScrollBehavior) {
-    route.ignoreScrollBehavior = true;
-  }
-
-  if (type === Redirect.type) {
-    route.handler = createRedirectHandler(props.to, props.params, props.query);
-    props.path = props.path || props.from || '*';
-  } else {
-    route.handler = props.handler;
-  }
-
-  var parentPath = (parentRoute && parentRoute.path) || '/';
-
-  if ((props.path || props.name) && type !== DefaultRoute.type && type !== NotFoundRoute.type) {
-    var path = props.path || props.name;
-
-    // Relative paths extend their parent.
-    if (!Path.isAbsolute(path))
-      path = Path.join(parentPath, path);
-
-    route.path = Path.normalize(path);
-  } else {
-    route.path = parentPath;
-
-    if (type === NotFoundRoute.type)
-      route.path += '*';
-  }
-
-  route.paramNames = Path.extractParamNames(route.path);
-
-  // Make sure the route's path has all params its parent needs.
-  if (parentRoute && Array.isArray(parentRoute.paramNames)) {
-    parentRoute.paramNames.forEach(function (paramName) {
-      invariant(
-        route.paramNames.indexOf(paramName) !== -1,
-        'The nested route path "%s" is missing the "%s" parameter of its parent path "%s"',
-        route.path, paramName, parentRoute.path
-      );
-    });
-  }
-
-  // Make sure the route can be looked up by <Link>s.
-  if (props.name) {
-    invariant(
-      namedRoutes[props.name] == null,
-      'You cannot use the name "%s" for more than one route',
-      props.name
-    );
-
-    namedRoutes[props.name] = route;
-  }
-
-  // Handle <NotFoundRoute>.
-  if (type === NotFoundRoute.type) {
-    invariant(
-      parentRoute,
-      '<NotFoundRoute> must have a parent <Route>'
-    );
-
-    invariant(
-      parentRoute.notFoundRoute == null,
-      'You may not have more than one <NotFoundRoute> per <Route>'
-    );
-
-    parentRoute.notFoundRoute = route;
-
-    return null;
-  }
-
-  // Handle <DefaultRoute>.
-  if (type === DefaultRoute.type) {
-    invariant(
-      parentRoute,
-      '<DefaultRoute> must have a parent <Route>'
-    );
-
-    invariant(
-      parentRoute.defaultRoute == null,
-      'You may not have more than one <DefaultRoute> per <Route>'
-    );
-
-    parentRoute.defaultRoute = route;
-
-    return null;
-  }
-
-  route.childRoutes = createRoutesFromChildren(props.children, route, namedRoutes);
-
-  return route;
-}
-
-/**
- * Creates and returns an array of route objects from the given ReactChildren.
- */
-function createRoutesFromChildren(children, parentRoute, namedRoutes) {
-  var routes = [];
-
-  React.Children.forEach(children, function (child) {
-    // Exclude <DefaultRoute>s and <NotFoundRoute>s.
-    if (child = createRoute(child, parentRoute, namedRoutes))
-      routes.push(child);
-  });
-
-  return routes;
-}
-
-module.exports = createRoutesFromChildren;
-
-},{"../components/DefaultRoute":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\DefaultRoute.js","../components/NotFoundRoute":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\NotFoundRoute.js","../components/Redirect":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\Redirect.js","../components/Route":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\components\\Route.js","./Path":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\Path.js","react":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js","react/lib/invariant":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\invariant.js","react/lib/warning":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\warning.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\getWindowScrollPosition.js":[function(require,module,exports){
+},{"qs":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\qs\\index.js","qs/lib/utils":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\qs\\lib\\utils.js","react/lib/invariant":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\invariant.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\getWindowScrollPosition.js":[function(require,module,exports){
 var invariant = require('react/lib/invariant');
 var canUseDOM = require('react/lib/ExecutionEnvironment').canUseDOM;
 
@@ -9787,64 +19156,7 @@ function getWindowScrollPosition() {
 
 module.exports = getWindowScrollPosition;
 
-},{"react/lib/ExecutionEnvironment":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\ExecutionEnvironment.js","react/lib/invariant":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\invariant.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\reversedArray.js":[function(require,module,exports){
-function reversedArray(array) {
-  return array.slice(0).reverse();
-}
-
-module.exports = reversedArray;
-
-},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\runRouter.js":[function(require,module,exports){
-var createRouter = require('./createRouter');
-
-/**
- * A high-level convenience method that creates, configures, and
- * runs a router in one shot. The method signature is:
- *
- *   Router.run(routes[, location ], callback);
- *
- * Using `window.location.hash` to manage the URL, you could do:
- *
- *   Router.run(routes, function (Handler) {
- *     React.render(<Handler/>, document.body);
- *   });
- * 
- * Using HTML5 history and a custom "cursor" prop:
- * 
- *   Router.run(routes, Router.HistoryLocation, function (Handler) {
- *     React.render(<Handler cursor={cursor}/>, document.body);
- *   });
- *
- * Returns the newly created router.
- *
- * Note: If you need to specify further options for your router such
- * as error/abort handling or custom scroll behavior, use Router.create
- * instead.
- *
- *   var router = Router.create(options);
- *   router.run(function (Handler) {
- *     // ...
- *   });
- */
-function runRouter(routes, location, callback) {
-  if (typeof location === 'function') {
-    callback = location;
-    location = null;
-  }
-
-  var router = createRouter({
-    routes: routes,
-    location: location
-  });
-
-  router.run(callback);
-
-  return router;
-}
-
-module.exports = runRouter;
-
-},{"./createRouter":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\createRouter.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\supportsHistory.js":[function(require,module,exports){
+},{"react/lib/ExecutionEnvironment":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\ExecutionEnvironment.js","react/lib/invariant":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\invariant.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\modules\\utils\\supportsHistory.js":[function(require,module,exports){
 function supportsHistory() {
   /*! taken from modernizr
    * https://github.com/Modernizr/Modernizr/blob/master/LICENSE
@@ -9865,9 +19177,9 @@ function supportsHistory() {
 module.exports = supportsHistory;
 
 },{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\qs\\index.js":[function(require,module,exports){
-module.exports = require('./lib');
+module.exports = require('./lib/');
 
-},{"./lib":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\qs\\lib\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\qs\\lib\\index.js":[function(require,module,exports){
+},{"./lib/":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\qs\\lib\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\qs\\lib\\index.js":[function(require,module,exports){
 // Load modules
 
 var Stringify = require('./stringify');
@@ -9916,7 +19228,7 @@ internals.parseValues = function (str, options) {
             var key = Utils.decode(part.slice(0, pos));
             var val = Utils.decode(part.slice(pos + 1));
 
-            if (!obj[key]) {
+            if (!obj.hasOwnProperty(key)) {
                 obj[key] = val;
             }
             else {
@@ -9945,8 +19257,11 @@ internals.parseObject = function (chain, val, options) {
     else {
         var cleanRoot = root[0] === '[' && root[root.length - 1] === ']' ? root.slice(1, root.length - 1) : root;
         var index = parseInt(cleanRoot, 10);
+        var indexString = '' + index;
         if (!isNaN(index) &&
             root !== cleanRoot &&
+            indexString === cleanRoot &&
+            index >= 0 &&
             index <= options.arrayLimit) {
 
             obj = [];
@@ -10049,11 +19364,12 @@ var Utils = require('./utils');
 // Declare internals
 
 var internals = {
-    delimiter: '&'
+    delimiter: '&',
+    indices: true
 };
 
 
-internals.stringify = function (obj, prefix) {
+internals.stringify = function (obj, prefix, options) {
 
     if (Utils.isBuffer(obj)) {
         obj = obj.toString();
@@ -10074,9 +19390,20 @@ internals.stringify = function (obj, prefix) {
 
     var values = [];
 
-    for (var key in obj) {
-        if (obj.hasOwnProperty(key)) {
-            values = values.concat(internals.stringify(obj[key], prefix + '[' + key + ']'));
+    if (typeof obj === 'undefined') {
+        return values;
+    }
+
+    var objKeys = Object.keys(obj);
+    for (var i = 0, il = objKeys.length; i < il; ++i) {
+        var key = objKeys[i];
+        if (!options.indices &&
+            Array.isArray(obj)) {
+
+            values = values.concat(internals.stringify(obj[key], prefix, options));
+        }
+        else {
+            values = values.concat(internals.stringify(obj[key], prefix + '[' + key + ']', options));
         }
     }
 
@@ -10088,20 +19415,26 @@ module.exports = function (obj, options) {
 
     options = options || {};
     var delimiter = typeof options.delimiter === 'undefined' ? internals.delimiter : options.delimiter;
+    options.indices = typeof options.indices === 'boolean' ? options.indices : internals.indices;
 
     var keys = [];
 
-    for (var key in obj) {
-        if (obj.hasOwnProperty(key)) {
-            keys = keys.concat(internals.stringify(obj[key], key));
-        }
+    if (typeof obj !== 'object' ||
+        obj === null) {
+
+        return '';
+    }
+
+    var objKeys = Object.keys(obj);
+    for (var i = 0, il = objKeys.length; i < il; ++i) {
+        var key = objKeys[i];
+        keys = keys.concat(internals.stringify(obj[key], key, options));
     }
 
     return keys.join(delimiter);
 };
 
 },{"./utils":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\qs\\lib\\utils.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\qs\\lib\\utils.js":[function(require,module,exports){
-(function (Buffer){
 // Load modules
 
 
@@ -10130,29 +19463,26 @@ exports.merge = function (target, source) {
         return target;
     }
 
-    if (Array.isArray(source)) {
-        for (var i = 0, il = source.length; i < il; ++i) {
-            if (typeof source[i] !== 'undefined') {
-                if (typeof target[i] === 'object') {
-                    target[i] = exports.merge(target[i], source[i]);
-                }
-                else {
-                    target[i] = source[i];
-                }
-            }
+    if (typeof source !== 'object') {
+        if (Array.isArray(target)) {
+            target.push(source);
+        }
+        else {
+            target[source] = true;
         }
 
         return target;
     }
 
-    if (Array.isArray(target)) {
-        if (typeof source !== 'object') {
-            target.push(source);
-            return target;
-        }
-        else {
-            target = exports.arrayToObject(target);
-        }
+    if (typeof target !== 'object') {
+        target = [target].concat(source);
+        return target;
+    }
+
+    if (Array.isArray(target) &&
+        !Array.isArray(source)) {
+
+        target = exports.arrayToObject(target);
     }
 
     var keys = Object.keys(source);
@@ -10160,18 +19490,11 @@ exports.merge = function (target, source) {
         var key = keys[k];
         var value = source[key];
 
-        if (value &&
-            typeof value === 'object') {
-
-            if (!target[key]) {
-                target[key] = value;
-            }
-            else {
-                target[key] = exports.merge(target[key], value);
-            }
+        if (!target[key]) {
+            target[key] = value;
         }
         else {
-            target[key] = value;
+            target[key] = exports.merge(target[key], value);
         }
     }
 
@@ -10208,7 +19531,7 @@ exports.compact = function (obj, refs) {
     if (Array.isArray(obj)) {
         var compacted = [];
 
-        for (var i = 0, l = obj.length; i < l; ++i) {
+        for (var i = 0, il = obj.length; i < il; ++i) {
             if (typeof obj[i] !== 'undefined') {
                 compacted.push(obj[i]);
             }
@@ -10218,7 +19541,7 @@ exports.compact = function (obj, refs) {
     }
 
     var keys = Object.keys(obj);
-    for (var i = 0, il = keys.length; i < il; ++i) {
+    for (i = 0, il = keys.length; i < il; ++i) {
         var key = keys[i];
         obj[key] = exports.compact(obj[key], refs);
     }
@@ -10234,1062 +19557,16 @@ exports.isRegExp = function (obj) {
 
 exports.isBuffer = function (obj) {
 
-    if (typeof Buffer !== 'undefined') {
-        return Buffer.isBuffer(obj);
-    }
-    else {
+    if (obj === null ||
+        typeof obj === 'undefined') {
+
         return false;
     }
+
+    return !!(obj.constructor &&
+        obj.constructor.isBuffer &&
+        obj.constructor.isBuffer(obj));
 };
-
-}).call(this,require("buffer").Buffer)
-},{"buffer":"C:\\Users\\Isaac\\AppData\\Roaming\\npm\\node_modules\\watchify\\node_modules\\browserify\\node_modules\\buffer\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\when\\lib\\Promise.js":[function(require,module,exports){
-/** @license MIT License (c) copyright 2010-2014 original author or authors */
-/** @author Brian Cavalier */
-/** @author John Hann */
-
-(function(define) { 'use strict';
-define(function (require) {
-
-	var makePromise = require('./makePromise');
-	var Scheduler = require('./Scheduler');
-	var async = require('./async');
-
-	return makePromise({
-		scheduler: new Scheduler(async)
-	});
-
-});
-})(typeof define === 'function' && define.amd ? define : function (factory) { module.exports = factory(require); });
-
-},{"./Scheduler":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\when\\lib\\Scheduler.js","./async":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\when\\lib\\async.js","./makePromise":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\when\\lib\\makePromise.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\when\\lib\\Queue.js":[function(require,module,exports){
-/** @license MIT License (c) copyright 2010-2014 original author or authors */
-/** @author Brian Cavalier */
-/** @author John Hann */
-
-(function(define) { 'use strict';
-define(function() {
-	/**
-	 * Circular queue
-	 * @param {number} capacityPow2 power of 2 to which this queue's capacity
-	 *  will be set initially. eg when capacityPow2 == 3, queue capacity
-	 *  will be 8.
-	 * @constructor
-	 */
-	function Queue(capacityPow2) {
-		this.head = this.tail = this.length = 0;
-		this.buffer = new Array(1 << capacityPow2);
-	}
-
-	Queue.prototype.push = function(x) {
-		if(this.length === this.buffer.length) {
-			this._ensureCapacity(this.length * 2);
-		}
-
-		this.buffer[this.tail] = x;
-		this.tail = (this.tail + 1) & (this.buffer.length - 1);
-		++this.length;
-		return this.length;
-	};
-
-	Queue.prototype.shift = function() {
-		var x = this.buffer[this.head];
-		this.buffer[this.head] = void 0;
-		this.head = (this.head + 1) & (this.buffer.length - 1);
-		--this.length;
-		return x;
-	};
-
-	Queue.prototype._ensureCapacity = function(capacity) {
-		var head = this.head;
-		var buffer = this.buffer;
-		var newBuffer = new Array(capacity);
-		var i = 0;
-		var len;
-
-		if(head === 0) {
-			len = this.length;
-			for(; i<len; ++i) {
-				newBuffer[i] = buffer[i];
-			}
-		} else {
-			capacity = buffer.length;
-			len = this.tail;
-			for(; head<capacity; ++i, ++head) {
-				newBuffer[i] = buffer[head];
-			}
-
-			for(head=0; head<len; ++i, ++head) {
-				newBuffer[i] = buffer[head];
-			}
-		}
-
-		this.buffer = newBuffer;
-		this.head = 0;
-		this.tail = this.length;
-	};
-
-	return Queue;
-
-});
-}(typeof define === 'function' && define.amd ? define : function(factory) { module.exports = factory(); }));
-
-},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\when\\lib\\Scheduler.js":[function(require,module,exports){
-/** @license MIT License (c) copyright 2010-2014 original author or authors */
-/** @author Brian Cavalier */
-/** @author John Hann */
-
-(function(define) { 'use strict';
-define(function(require) {
-
-	var Queue = require('./Queue');
-
-	// Credit to Twisol (https://github.com/Twisol) for suggesting
-	// this type of extensible queue + trampoline approach for next-tick conflation.
-
-	/**
-	 * Async task scheduler
-	 * @param {function} async function to schedule a single async function
-	 * @constructor
-	 */
-	function Scheduler(async) {
-		this._async = async;
-		this._queue = new Queue(15);
-		this._afterQueue = new Queue(5);
-		this._running = false;
-
-		var self = this;
-		this.drain = function() {
-			self._drain();
-		};
-	}
-
-	/**
-	 * Enqueue a task
-	 * @param {{ run:function }} task
-	 */
-	Scheduler.prototype.enqueue = function(task) {
-		this._add(this._queue, task);
-	};
-
-	/**
-	 * Enqueue a task to run after the main task queue
-	 * @param {{ run:function }} task
-	 */
-	Scheduler.prototype.afterQueue = function(task) {
-		this._add(this._afterQueue, task);
-	};
-
-	/**
-	 * Drain the handler queue entirely, and then the after queue
-	 */
-	Scheduler.prototype._drain = function() {
-		runQueue(this._queue);
-		this._running = false;
-		runQueue(this._afterQueue);
-	};
-
-	/**
-	 * Add a task to the q, and schedule drain if not already scheduled
-	 * @param {Queue} queue
-	 * @param {{run:function}} task
-	 * @private
-	 */
-	Scheduler.prototype._add = function(queue, task) {
-		queue.push(task);
-		if(!this._running) {
-			this._running = true;
-			this._async(this.drain);
-		}
-	};
-
-	/**
-	 * Run all the tasks in the q
-	 * @param queue
-	 */
-	function runQueue(queue) {
-		while(queue.length > 0) {
-			queue.shift().run();
-		}
-	}
-
-	return Scheduler;
-
-});
-}(typeof define === 'function' && define.amd ? define : function(factory) { module.exports = factory(require); }));
-
-},{"./Queue":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\when\\lib\\Queue.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\when\\lib\\async.js":[function(require,module,exports){
-(function (process){
-/** @license MIT License (c) copyright 2010-2014 original author or authors */
-/** @author Brian Cavalier */
-/** @author John Hann */
-
-(function(define) { 'use strict';
-define(function(require) {
-
-	// Sniff "best" async scheduling option
-	// Prefer process.nextTick or MutationObserver, then check for
-	// vertx and finally fall back to setTimeout
-
-	/*jshint maxcomplexity:6*/
-	/*global process,document,setTimeout,MutationObserver,WebKitMutationObserver*/
-	var nextTick, MutationObs;
-
-	if (typeof process !== 'undefined' && process !== null &&
-		typeof process.nextTick === 'function') {
-		nextTick = function(f) {
-			process.nextTick(f);
-		};
-
-	} else if (MutationObs =
-		(typeof MutationObserver === 'function' && MutationObserver) ||
-		(typeof WebKitMutationObserver === 'function' && WebKitMutationObserver)) {
-		nextTick = (function (document, MutationObserver) {
-			var scheduled;
-			var el = document.createElement('div');
-			var o = new MutationObserver(run);
-			o.observe(el, { attributes: true });
-
-			function run() {
-				var f = scheduled;
-				scheduled = void 0;
-				f();
-			}
-
-			return function (f) {
-				scheduled = f;
-				el.setAttribute('class', 'x');
-			};
-		}(document, MutationObs));
-
-	} else {
-		nextTick = (function(cjsRequire) {
-			var vertx;
-			try {
-				// vert.x 1.x || 2.x
-				vertx = cjsRequire('vertx');
-			} catch (ignore) {}
-
-			if (vertx) {
-				if (typeof vertx.runOnLoop === 'function') {
-					return vertx.runOnLoop;
-				}
-				if (typeof vertx.runOnContext === 'function') {
-					return vertx.runOnContext;
-				}
-			}
-
-			// capture setTimeout to avoid being caught by fake timers
-			// used in time based tests
-			var capturedSetTimeout = setTimeout;
-			return function (t) {
-				capturedSetTimeout(t, 0);
-			};
-		}(require));
-	}
-
-	return nextTick;
-});
-}(typeof define === 'function' && define.amd ? define : function(factory) { module.exports = factory(require); }));
-
-}).call(this,require('_process'))
-},{"_process":"C:\\Users\\Isaac\\AppData\\Roaming\\npm\\node_modules\\watchify\\node_modules\\browserify\\node_modules\\process\\browser.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-router\\node_modules\\when\\lib\\makePromise.js":[function(require,module,exports){
-/** @license MIT License (c) copyright 2010-2014 original author or authors */
-/** @author Brian Cavalier */
-/** @author John Hann */
-
-(function(define) { 'use strict';
-define(function() {
-
-	return function makePromise(environment) {
-
-		var tasks = environment.scheduler;
-
-		var objectCreate = Object.create ||
-			function(proto) {
-				function Child() {}
-				Child.prototype = proto;
-				return new Child();
-			};
-
-		/**
-		 * Create a promise whose fate is determined by resolver
-		 * @constructor
-		 * @returns {Promise} promise
-		 * @name Promise
-		 */
-		function Promise(resolver, handler) {
-			this._handler = resolver === Handler ? handler : init(resolver);
-		}
-
-		/**
-		 * Run the supplied resolver
-		 * @param resolver
-		 * @returns {Pending}
-		 */
-		function init(resolver) {
-			var handler = new Pending();
-
-			try {
-				resolver(promiseResolve, promiseReject, promiseNotify);
-			} catch (e) {
-				promiseReject(e);
-			}
-
-			return handler;
-
-			/**
-			 * Transition from pre-resolution state to post-resolution state, notifying
-			 * all listeners of the ultimate fulfillment or rejection
-			 * @param {*} x resolution value
-			 */
-			function promiseResolve (x) {
-				handler.resolve(x);
-			}
-			/**
-			 * Reject this promise with reason, which will be used verbatim
-			 * @param {Error|*} reason rejection reason, strongly suggested
-			 *   to be an Error type
-			 */
-			function promiseReject (reason) {
-				handler.reject(reason);
-			}
-
-			/**
-			 * Issue a progress event, notifying all progress listeners
-			 * @param {*} x progress event payload to pass to all listeners
-			 */
-			function promiseNotify (x) {
-				handler.notify(x);
-			}
-		}
-
-		// Creation
-
-		Promise.resolve = resolve;
-		Promise.reject = reject;
-		Promise.never = never;
-
-		Promise._defer = defer;
-		Promise._handler = getHandler;
-
-		/**
-		 * Returns a trusted promise. If x is already a trusted promise, it is
-		 * returned, otherwise returns a new trusted Promise which follows x.
-		 * @param  {*} x
-		 * @return {Promise} promise
-		 */
-		function resolve(x) {
-			return isPromise(x) ? x
-				: new Promise(Handler, new Async(getHandler(x)));
-		}
-
-		/**
-		 * Return a reject promise with x as its reason (x is used verbatim)
-		 * @param {*} x
-		 * @returns {Promise} rejected promise
-		 */
-		function reject(x) {
-			return new Promise(Handler, new Async(new Rejected(x)));
-		}
-
-		/**
-		 * Return a promise that remains pending forever
-		 * @returns {Promise} forever-pending promise.
-		 */
-		function never() {
-			return foreverPendingPromise; // Should be frozen
-		}
-
-		/**
-		 * Creates an internal {promise, resolver} pair
-		 * @private
-		 * @returns {Promise}
-		 */
-		function defer() {
-			return new Promise(Handler, new Pending());
-		}
-
-		// Transformation and flow control
-
-		/**
-		 * Transform this promise's fulfillment value, returning a new Promise
-		 * for the transformed result.  If the promise cannot be fulfilled, onRejected
-		 * is called with the reason.  onProgress *may* be called with updates toward
-		 * this promise's fulfillment.
-		 * @param {function=} onFulfilled fulfillment handler
-		 * @param {function=} onRejected rejection handler
-		 * @deprecated @param {function=} onProgress progress handler
-		 * @return {Promise} new promise
-		 */
-		Promise.prototype.then = function(onFulfilled, onRejected) {
-			var parent = this._handler;
-			var state = parent.join().state();
-
-			if ((typeof onFulfilled !== 'function' && state > 0) ||
-				(typeof onRejected !== 'function' && state < 0)) {
-				// Short circuit: value will not change, simply share handler
-				return new this.constructor(Handler, parent);
-			}
-
-			var p = this._beget();
-			var child = p._handler;
-
-			parent.chain(child, parent.receiver, onFulfilled, onRejected,
-					arguments.length > 2 ? arguments[2] : void 0);
-
-			return p;
-		};
-
-		/**
-		 * If this promise cannot be fulfilled due to an error, call onRejected to
-		 * handle the error. Shortcut for .then(undefined, onRejected)
-		 * @param {function?} onRejected
-		 * @return {Promise}
-		 */
-		Promise.prototype['catch'] = function(onRejected) {
-			return this.then(void 0, onRejected);
-		};
-
-		/**
-		 * Creates a new, pending promise of the same type as this promise
-		 * @private
-		 * @returns {Promise}
-		 */
-		Promise.prototype._beget = function() {
-			var parent = this._handler;
-			var child = new Pending(parent.receiver, parent.join().context);
-			return new this.constructor(Handler, child);
-		};
-
-		// Array combinators
-
-		Promise.all = all;
-		Promise.race = race;
-
-		/**
-		 * Return a promise that will fulfill when all promises in the
-		 * input array have fulfilled, or will reject when one of the
-		 * promises rejects.
-		 * @param {array} promises array of promises
-		 * @returns {Promise} promise for array of fulfillment values
-		 */
-		function all(promises) {
-			/*jshint maxcomplexity:8*/
-			var resolver = new Pending();
-			var pending = promises.length >>> 0;
-			var results = new Array(pending);
-
-			var i, h, x, s;
-			for (i = 0; i < promises.length; ++i) {
-				x = promises[i];
-
-				if (x === void 0 && !(i in promises)) {
-					--pending;
-					continue;
-				}
-
-				if (maybeThenable(x)) {
-					h = getHandlerMaybeThenable(x);
-
-					s = h.state();
-					if (s === 0) {
-						h.fold(settleAt, i, results, resolver);
-					} else if (s > 0) {
-						results[i] = h.value;
-						--pending;
-					} else {
-						unreportRemaining(promises, i+1, h);
-						resolver.become(h);
-						break;
-					}
-
-				} else {
-					results[i] = x;
-					--pending;
-				}
-			}
-
-			if(pending === 0) {
-				resolver.become(new Fulfilled(results));
-			}
-
-			return new Promise(Handler, resolver);
-
-			function settleAt(i, x, resolver) {
-				/*jshint validthis:true*/
-				this[i] = x;
-				if(--pending === 0) {
-					resolver.become(new Fulfilled(this));
-				}
-			}
-		}
-
-		function unreportRemaining(promises, start, rejectedHandler) {
-			var i, h, x;
-			for(i=start; i<promises.length; ++i) {
-				x = promises[i];
-				if(maybeThenable(x)) {
-					h = getHandlerMaybeThenable(x);
-
-					if(h !== rejectedHandler) {
-						h.visit(h, void 0, h._unreport);
-					}
-				}
-			}
-		}
-
-		/**
-		 * Fulfill-reject competitive race. Return a promise that will settle
-		 * to the same state as the earliest input promise to settle.
-		 *
-		 * WARNING: The ES6 Promise spec requires that race()ing an empty array
-		 * must return a promise that is pending forever.  This implementation
-		 * returns a singleton forever-pending promise, the same singleton that is
-		 * returned by Promise.never(), thus can be checked with ===
-		 *
-		 * @param {array} promises array of promises to race
-		 * @returns {Promise} if input is non-empty, a promise that will settle
-		 * to the same outcome as the earliest input promise to settle. if empty
-		 * is empty, returns a promise that will never settle.
-		 */
-		function race(promises) {
-			// Sigh, race([]) is untestable unless we return *something*
-			// that is recognizable without calling .then() on it.
-			if(Object(promises) === promises && promises.length === 0) {
-				return never();
-			}
-
-			var h = new Pending();
-			var i, x;
-			for(i=0; i<promises.length; ++i) {
-				x = promises[i];
-				if (x !== void 0 && i in promises) {
-					getHandler(x).visit(h, h.resolve, h.reject);
-				}
-			}
-			return new Promise(Handler, h);
-		}
-
-		// Promise internals
-		// Below this, everything is @private
-
-		/**
-		 * Get an appropriate handler for x, without checking for cycles
-		 * @param {*} x
-		 * @returns {object} handler
-		 */
-		function getHandler(x) {
-			if(isPromise(x)) {
-				return x._handler.join();
-			}
-			return maybeThenable(x) ? getHandlerUntrusted(x) : new Fulfilled(x);
-		}
-
-		/**
-		 * Get a handler for thenable x.
-		 * NOTE: You must only call this if maybeThenable(x) == true
-		 * @param {object|function|Promise} x
-		 * @returns {object} handler
-		 */
-		function getHandlerMaybeThenable(x) {
-			return isPromise(x) ? x._handler.join() : getHandlerUntrusted(x);
-		}
-
-		/**
-		 * Get a handler for potentially untrusted thenable x
-		 * @param {*} x
-		 * @returns {object} handler
-		 */
-		function getHandlerUntrusted(x) {
-			try {
-				var untrustedThen = x.then;
-				return typeof untrustedThen === 'function'
-					? new Thenable(untrustedThen, x)
-					: new Fulfilled(x);
-			} catch(e) {
-				return new Rejected(e);
-			}
-		}
-
-		/**
-		 * Handler for a promise that is pending forever
-		 * @constructor
-		 */
-		function Handler() {}
-
-		Handler.prototype.when
-			= Handler.prototype.become
-			= Handler.prototype.notify
-			= Handler.prototype.fail
-			= Handler.prototype._unreport
-			= Handler.prototype._report
-			= noop;
-
-		Handler.prototype._state = 0;
-
-		Handler.prototype.state = function() {
-			return this._state;
-		};
-
-		/**
-		 * Recursively collapse handler chain to find the handler
-		 * nearest to the fully resolved value.
-		 * @returns {object} handler nearest the fully resolved value
-		 */
-		Handler.prototype.join = function() {
-			var h = this;
-			while(h.handler !== void 0) {
-				h = h.handler;
-			}
-			return h;
-		};
-
-		Handler.prototype.chain = function(to, receiver, fulfilled, rejected, progress) {
-			this.when({
-				resolver: to,
-				receiver: receiver,
-				fulfilled: fulfilled,
-				rejected: rejected,
-				progress: progress
-			});
-		};
-
-		Handler.prototype.visit = function(receiver, fulfilled, rejected, progress) {
-			this.chain(failIfRejected, receiver, fulfilled, rejected, progress);
-		};
-
-		Handler.prototype.fold = function(f, z, c, to) {
-			this.visit(to, function(x) {
-				f.call(c, z, x, this);
-			}, to.reject, to.notify);
-		};
-
-		/**
-		 * Handler that invokes fail() on any handler it becomes
-		 * @constructor
-		 */
-		function FailIfRejected() {}
-
-		inherit(Handler, FailIfRejected);
-
-		FailIfRejected.prototype.become = function(h) {
-			h.fail();
-		};
-
-		var failIfRejected = new FailIfRejected();
-
-		/**
-		 * Handler that manages a queue of consumers waiting on a pending promise
-		 * @constructor
-		 */
-		function Pending(receiver, inheritedContext) {
-			Promise.createContext(this, inheritedContext);
-
-			this.consumers = void 0;
-			this.receiver = receiver;
-			this.handler = void 0;
-			this.resolved = false;
-		}
-
-		inherit(Handler, Pending);
-
-		Pending.prototype._state = 0;
-
-		Pending.prototype.resolve = function(x) {
-			this.become(getHandler(x));
-		};
-
-		Pending.prototype.reject = function(x) {
-			if(this.resolved) {
-				return;
-			}
-
-			this.become(new Rejected(x));
-		};
-
-		Pending.prototype.join = function() {
-			if (!this.resolved) {
-				return this;
-			}
-
-			var h = this;
-
-			while (h.handler !== void 0) {
-				h = h.handler;
-				if (h === this) {
-					return this.handler = cycle();
-				}
-			}
-
-			return h;
-		};
-
-		Pending.prototype.run = function() {
-			var q = this.consumers;
-			var handler = this.join();
-			this.consumers = void 0;
-
-			for (var i = 0; i < q.length; ++i) {
-				handler.when(q[i]);
-			}
-		};
-
-		Pending.prototype.become = function(handler) {
-			if(this.resolved) {
-				return;
-			}
-
-			this.resolved = true;
-			this.handler = handler;
-			if(this.consumers !== void 0) {
-				tasks.enqueue(this);
-			}
-
-			if(this.context !== void 0) {
-				handler._report(this.context);
-			}
-		};
-
-		Pending.prototype.when = function(continuation) {
-			if(this.resolved) {
-				tasks.enqueue(new ContinuationTask(continuation, this.handler));
-			} else {
-				if(this.consumers === void 0) {
-					this.consumers = [continuation];
-				} else {
-					this.consumers.push(continuation);
-				}
-			}
-		};
-
-		Pending.prototype.notify = function(x) {
-			if(!this.resolved) {
-				tasks.enqueue(new ProgressTask(x, this));
-			}
-		};
-
-		Pending.prototype.fail = function(context) {
-			var c = typeof context === 'undefined' ? this.context : context;
-			this.resolved && this.handler.join().fail(c);
-		};
-
-		Pending.prototype._report = function(context) {
-			this.resolved && this.handler.join()._report(context);
-		};
-
-		Pending.prototype._unreport = function() {
-			this.resolved && this.handler.join()._unreport();
-		};
-
-		/**
-		 * Wrap another handler and force it into a future stack
-		 * @param {object} handler
-		 * @constructor
-		 */
-		function Async(handler) {
-			this.handler = handler;
-		}
-
-		inherit(Handler, Async);
-
-		Async.prototype.when = function(continuation) {
-			tasks.enqueue(new ContinuationTask(continuation, this));
-		};
-
-		Async.prototype._report = function(context) {
-			this.join()._report(context);
-		};
-
-		Async.prototype._unreport = function() {
-			this.join()._unreport();
-		};
-
-		/**
-		 * Handler that wraps an untrusted thenable and assimilates it in a future stack
-		 * @param {function} then
-		 * @param {{then: function}} thenable
-		 * @constructor
-		 */
-		function Thenable(then, thenable) {
-			Pending.call(this);
-			tasks.enqueue(new AssimilateTask(then, thenable, this));
-		}
-
-		inherit(Pending, Thenable);
-
-		/**
-		 * Handler for a fulfilled promise
-		 * @param {*} x fulfillment value
-		 * @constructor
-		 */
-		function Fulfilled(x) {
-			Promise.createContext(this);
-			this.value = x;
-		}
-
-		inherit(Handler, Fulfilled);
-
-		Fulfilled.prototype._state = 1;
-
-		Fulfilled.prototype.fold = function(f, z, c, to) {
-			runContinuation3(f, z, this, c, to);
-		};
-
-		Fulfilled.prototype.when = function(cont) {
-			runContinuation1(cont.fulfilled, this, cont.receiver, cont.resolver);
-		};
-
-		var errorId = 0;
-
-		/**
-		 * Handler for a rejected promise
-		 * @param {*} x rejection reason
-		 * @constructor
-		 */
-		function Rejected(x) {
-			Promise.createContext(this);
-
-			this.id = ++errorId;
-			this.value = x;
-			this.handled = false;
-			this.reported = false;
-
-			this._report();
-		}
-
-		inherit(Handler, Rejected);
-
-		Rejected.prototype._state = -1;
-
-		Rejected.prototype.fold = function(f, z, c, to) {
-			to.become(this);
-		};
-
-		Rejected.prototype.when = function(cont) {
-			if(typeof cont.rejected === 'function') {
-				this._unreport();
-			}
-			runContinuation1(cont.rejected, this, cont.receiver, cont.resolver);
-		};
-
-		Rejected.prototype._report = function(context) {
-			tasks.afterQueue(new ReportTask(this, context));
-		};
-
-		Rejected.prototype._unreport = function() {
-			this.handled = true;
-			tasks.afterQueue(new UnreportTask(this));
-		};
-
-		Rejected.prototype.fail = function(context) {
-			Promise.onFatalRejection(this, context === void 0 ? this.context : context);
-		};
-
-		function ReportTask(rejection, context) {
-			this.rejection = rejection;
-			this.context = context;
-		}
-
-		ReportTask.prototype.run = function() {
-			if(!this.rejection.handled) {
-				this.rejection.reported = true;
-				Promise.onPotentiallyUnhandledRejection(this.rejection, this.context);
-			}
-		};
-
-		function UnreportTask(rejection) {
-			this.rejection = rejection;
-		}
-
-		UnreportTask.prototype.run = function() {
-			if(this.rejection.reported) {
-				Promise.onPotentiallyUnhandledRejectionHandled(this.rejection);
-			}
-		};
-
-		// Unhandled rejection hooks
-		// By default, everything is a noop
-
-		// TODO: Better names: "annotate"?
-		Promise.createContext
-			= Promise.enterContext
-			= Promise.exitContext
-			= Promise.onPotentiallyUnhandledRejection
-			= Promise.onPotentiallyUnhandledRejectionHandled
-			= Promise.onFatalRejection
-			= noop;
-
-		// Errors and singletons
-
-		var foreverPendingHandler = new Handler();
-		var foreverPendingPromise = new Promise(Handler, foreverPendingHandler);
-
-		function cycle() {
-			return new Rejected(new TypeError('Promise cycle'));
-		}
-
-		// Task runners
-
-		/**
-		 * Run a single consumer
-		 * @constructor
-		 */
-		function ContinuationTask(continuation, handler) {
-			this.continuation = continuation;
-			this.handler = handler;
-		}
-
-		ContinuationTask.prototype.run = function() {
-			this.handler.join().when(this.continuation);
-		};
-
-		/**
-		 * Run a queue of progress handlers
-		 * @constructor
-		 */
-		function ProgressTask(value, handler) {
-			this.handler = handler;
-			this.value = value;
-		}
-
-		ProgressTask.prototype.run = function() {
-			var q = this.handler.consumers;
-			if(q === void 0) {
-				return;
-			}
-
-			for (var c, i = 0; i < q.length; ++i) {
-				c = q[i];
-				runNotify(c.progress, this.value, this.handler, c.receiver, c.resolver);
-			}
-		};
-
-		/**
-		 * Assimilate a thenable, sending it's value to resolver
-		 * @param {function} then
-		 * @param {object|function} thenable
-		 * @param {object} resolver
-		 * @constructor
-		 */
-		function AssimilateTask(then, thenable, resolver) {
-			this._then = then;
-			this.thenable = thenable;
-			this.resolver = resolver;
-		}
-
-		AssimilateTask.prototype.run = function() {
-			var h = this.resolver;
-			tryAssimilate(this._then, this.thenable, _resolve, _reject, _notify);
-
-			function _resolve(x) { h.resolve(x); }
-			function _reject(x)  { h.reject(x); }
-			function _notify(x)  { h.notify(x); }
-		};
-
-		function tryAssimilate(then, thenable, resolve, reject, notify) {
-			try {
-				then.call(thenable, resolve, reject, notify);
-			} catch (e) {
-				reject(e);
-			}
-		}
-
-		// Other helpers
-
-		/**
-		 * @param {*} x
-		 * @returns {boolean} true iff x is a trusted Promise
-		 */
-		function isPromise(x) {
-			return x instanceof Promise;
-		}
-
-		/**
-		 * Test just enough to rule out primitives, in order to take faster
-		 * paths in some code
-		 * @param {*} x
-		 * @returns {boolean} false iff x is guaranteed *not* to be a thenable
-		 */
-		function maybeThenable(x) {
-			return (typeof x === 'object' || typeof x === 'function') && x !== null;
-		}
-
-		function runContinuation1(f, h, receiver, next) {
-			if(typeof f !== 'function') {
-				return next.become(h);
-			}
-
-			Promise.enterContext(h);
-			tryCatchReject(f, h.value, receiver, next);
-			Promise.exitContext();
-		}
-
-		function runContinuation3(f, x, h, receiver, next) {
-			if(typeof f !== 'function') {
-				return next.become(h);
-			}
-
-			Promise.enterContext(h);
-			tryCatchReject3(f, x, h.value, receiver, next);
-			Promise.exitContext();
-		}
-
-		function runNotify(f, x, h, receiver, next) {
-			if(typeof f !== 'function') {
-				return next.notify(x);
-			}
-
-			Promise.enterContext(h);
-			tryCatchReturn(f, x, receiver, next);
-			Promise.exitContext();
-		}
-
-		/**
-		 * Return f.call(thisArg, x), or if it throws return a rejected promise for
-		 * the thrown exception
-		 */
-		function tryCatchReject(f, x, thisArg, next) {
-			try {
-				next.become(getHandler(f.call(thisArg, x)));
-			} catch(e) {
-				next.become(new Rejected(e));
-			}
-		}
-
-		/**
-		 * Same as above, but includes the extra argument parameter.
-		 */
-		function tryCatchReject3(f, x, y, thisArg, next) {
-			try {
-				f.call(thisArg, x, y, next);
-			} catch(e) {
-				next.become(new Rejected(e));
-			}
-		}
-
-		/**
-		 * Return f.call(thisArg, x), or if it throws, *return* the exception
-		 */
-		function tryCatchReturn(f, x, thisArg, next) {
-			try {
-				next.notify(f.call(thisArg, x));
-			} catch(e) {
-				next.notify(e);
-			}
-		}
-
-		function inherit(Parent, Child) {
-			Child.prototype = objectCreate(Parent.prototype);
-			Child.prototype.constructor = Child;
-		}
-
-		function noop() {}
-
-		return Promise;
-	};
-});
-}(typeof define === 'function' && define.amd ? define : function(factory) { module.exports = factory(); }));
 
 },{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react-tap-event-plugin\\src\\ResponderEventPlugin.js":[function(require,module,exports){
 /**
@@ -11688,7 +19965,6 @@ var dependencies = [
 
 if (EventPluginUtils.useTouchEvents) {
   dependencies.push(
-    topLevelTypes.topTouchCancel,
     topLevelTypes.topTouchEnd,
     topLevelTypes.topTouchStart,
     topLevelTypes.topTouchMove
@@ -31763,7 +40039,10 @@ module.exports = warning;
 },{"./emptyFunction":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\emptyFunction.js","_process":"C:\\Users\\Isaac\\AppData\\Roaming\\npm\\node_modules\\watchify\\node_modules\\browserify\\node_modules\\process\\browser.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\react.js":[function(require,module,exports){
 module.exports = require('./lib/React');
 
-},{"./lib/React":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\React.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\node_modules\\eventemitter3\\index.js":[function(require,module,exports){
+},{"./lib/React":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\react\\lib\\React.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\index.js":[function(require,module,exports){
+module.exports = require('./src');
+
+},{"./src":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\node_modules\\eventemitter3\\index.js":[function(require,module,exports){
 'use strict';
 
 /**
@@ -31994,6 +40273,15 @@ EventEmitter.EventEmitter3 = EventEmitter;
 //
 module.exports = EventEmitter;
 
+},{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\node_modules\\native-promise-only\\npo.js":[function(require,module,exports){
+(function (global){
+/*! Native Promise Only
+    v0.7.6-a (c) Kyle Simpson
+    MIT License: http://getify.mit-license.org
+*/
+!function(t,n,e){n[t]=n[t]||e(),"undefined"!=typeof module&&module.exports?module.exports=n[t]:"function"==typeof define&&define.amd&&define(function(){return n[t]})}("Promise","undefined"!=typeof global?global:this,function(){"use strict";function t(t,n){l.add(t,n),h||(h=y(l.drain))}function n(t){var n,e=typeof t;return null==t||"object"!=e&&"function"!=e||(n=t.then),"function"==typeof n?n:!1}function e(){for(var t=0;t<this.chain.length;t++)o(this,1===this.state?this.chain[t].success:this.chain[t].failure,this.chain[t]);this.chain.length=0}function o(t,e,o){var r,i;try{e===!1?o.reject(t.msg):(r=e===!0?t.msg:e.call(void 0,t.msg),r===o.promise?o.reject(TypeError("Promise-chain cycle")):(i=n(r))?i.call(r,o.resolve,o.reject):o.resolve(r))}catch(c){o.reject(c)}}function r(o){var c,u,a=this;if(!a.triggered){a.triggered=!0,a.def&&(a=a.def);try{(c=n(o))?(u=new f(a),c.call(o,function(){r.apply(u,arguments)},function(){i.apply(u,arguments)})):(a.msg=o,a.state=1,a.chain.length>0&&t(e,a))}catch(s){i.call(u||new f(a),s)}}}function i(n){var o=this;o.triggered||(o.triggered=!0,o.def&&(o=o.def),o.msg=n,o.state=2,o.chain.length>0&&t(e,o))}function c(t,n,e,o){for(var r=0;r<n.length;r++)!function(r){t.resolve(n[r]).then(function(t){e(r,t)},o)}(r)}function f(t){this.def=t,this.triggered=!1}function u(t){this.promise=t,this.state=0,this.triggered=!1,this.chain=[],this.msg=void 0}function a(n){if("function"!=typeof n)throw TypeError("Not a function");if(0!==this.__NPO__)throw TypeError("Not a promise");this.__NPO__=1;var o=new u(this);this.then=function(n,r){var i={success:"function"==typeof n?n:!0,failure:"function"==typeof r?r:!1};return i.promise=new this.constructor(function(t,n){if("function"!=typeof t||"function"!=typeof n)throw TypeError("Not a function");i.resolve=t,i.reject=n}),o.chain.push(i),0!==o.state&&t(e,o),i.promise},this["catch"]=function(t){return this.then(void 0,t)};try{n.call(void 0,function(t){r.call(o,t)},function(t){i.call(o,t)})}catch(c){i.call(o,c)}}var s,h,l,p=Object.prototype.toString,y="undefined"!=typeof setImmediate?function(t){return setImmediate(t)}:setTimeout;try{Object.defineProperty({},"x",{}),s=function(t,n,e,o){return Object.defineProperty(t,n,{value:e,writable:!0,configurable:o!==!1})}}catch(d){s=function(t,n,e){return t[n]=e,t}}l=function(){function t(t,n){this.fn=t,this.self=n,this.next=void 0}var n,e,o;return{add:function(r,i){o=new t(r,i),e?e.next=o:n=o,e=o,o=void 0},drain:function(){var t=n;for(n=e=h=void 0;t;)t.fn.call(t.self),t=t.next}}}();var g=s({},"constructor",a,!1);return s(a,"prototype",g,!1),s(g,"__NPO__",0,!1),s(a,"resolve",function(t){var n=this;return t&&"object"==typeof t&&1===t.__NPO__?t:new n(function(n,e){if("function"!=typeof n||"function"!=typeof e)throw TypeError("Not a function");n(t)})}),s(a,"reject",function(t){return new this(function(n,e){if("function"!=typeof n||"function"!=typeof e)throw TypeError("Not a function");e(t)})}),s(a,"all",function(t){var n=this;return"[object Array]"!=p.call(t)?n.reject(TypeError("Not an array")):0===t.length?n.resolve([]):new n(function(e,o){if("function"!=typeof e||"function"!=typeof o)throw TypeError("Not a function");var r=t.length,i=Array(r),f=0;c(n,t,function(t,n){i[t]=n,++f===r&&e(i)},o)})}),s(a,"race",function(t){var n=this;return"[object Array]"!=p.call(t)?n.reject(TypeError("Not an array")):new n(function(e,o){if("function"!=typeof e||"function"!=typeof o)throw TypeError("Not a function");c(n,t,function(t,n){e(n)},o)})}),a});
+
+}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\ActionMethods.js":[function(require,module,exports){
 /**
  * A module of methods that you want to include in all actions.
@@ -32019,6 +40307,49 @@ exports.reset = function() {
 },{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\ListenerMethods.js":[function(require,module,exports){
 var _ = require('./utils'),
     maker = require('./joins').instanceJoinCreator;
+
+/**
+ * Extract child listenables from a parent from their
+ * children property and return them in a keyed Object
+ *
+ * @param {Object} listenable The parent listenable
+ */
+var mapChildListenables = function(listenable) {
+    var i = 0, children = {}, childName;
+    for (;i < (listenable.children||[]).length; ++i) {
+        childName = listenable.children[i];
+        if(listenable[childName]){
+            children[childName] = listenable[childName];
+        }
+    }
+    return children;
+};
+
+/**
+ * Make a flat dictionary of all listenables including their
+ * possible children (recursively), concatenating names in camelCase.
+ *
+ * @param {Object} listenables The top-level listenables
+ */
+var flattenListenables = function(listenables) {
+    var flattened = {};
+    for(var key in listenables){
+        var listenable = listenables[key];
+        var childMap = mapChildListenables(listenable);
+
+        // recursively flatten children
+        var children = flattenListenables(childMap);
+
+        // add the primary listenable and chilren
+        flattened[key] = listenable;
+        for(var childKey in children){
+            var childListenable = children[childKey];
+            flattened[key + _.capitalize(childKey)] = childListenable;
+        }
+    }
+
+    return flattened;
+};
 
 /**
  * A module of methods related to listening.
@@ -32051,11 +40382,12 @@ module.exports = {
      * @param {Object} listenables An object of listenables. Keys will be used as callback method names.
      */
     listenToMany: function(listenables){
-        for(var key in listenables){
+        var allListenables = flattenListenables(listenables);
+        for(var key in allListenables){
             var cbname = _.callbackName(key),
                 localname = this[cbname] ? cbname : this[key] ? key : undefined;
             if (localname){
-                this.listenTo(listenables[key],localname,this[cbname+"Default"]||this[localname+"Default"]||localname);
+                this.listenTo(allListenables[key],localname,this[cbname+"Default"]||this[localname+"Default"]||localname);
             }
         }
     },
@@ -32146,7 +40478,7 @@ module.exports = {
         defaultCallback = (defaultCallback && this[defaultCallback]) || defaultCallback;
         var me = this;
         if (_.isFunction(defaultCallback) && _.isFunction(listenable.getInitialState)) {
-            data = listenable.getInitialState();
+            var data = listenable.getInitialState();
             if (data && _.isFunction(data.then)) {
                 data.then(function() {
                     defaultCallback.apply(me, arguments);
@@ -32248,6 +40580,7 @@ module.exports = {
      * @returns {Function} Callback that unsubscribes the registered event handler
      */
     listen: function(callback, bindContext) {
+        bindContext = bindContext || this;
         var eventHandler = function(args) {
             callback.apply(bindContext, args);
         }, me = this;
@@ -32255,6 +40588,54 @@ module.exports = {
         return function() {
             me.emitter.removeListener(me.eventLabel, eventHandler);
         };
+    },
+
+    /**
+     * Attach handlers to promise that trigger the completed and failed
+     * child publishers, if available.
+     *
+     * @param {Object} The promise to attach to
+     */
+    promise: function(promise) {
+        var me = this;
+
+        var canHandlePromise =
+            this.children.indexOf('completed') >= 0 &&
+            this.children.indexOf('failed') >= 0;
+
+        if (!canHandlePromise){
+            throw new Error('Publisher must have "completed" and "failed" child publishers');
+        }
+
+        promise.then(function(response) {
+            return me.completed(response);
+        });
+        // IE compatibility - catch is a reserved word - without bracket notation source compilation will fail under IE
+        promise["catch"](function(error) {
+            return me.failed(error);
+        });
+    },
+
+    /**
+     * Subscribes the given callback for action triggered, which should
+     * return a promise that in turn is passed to `this.promise`
+     *
+     * @param {Function} callback The callback to register as event handler
+     */
+    listenAndPromise: function(callback, bindContext) {
+        var me = this;
+        bindContext = bindContext || this;
+
+        return this.listen(function() {
+
+            if (!callback) {
+                throw new Error('Expected a function returning a promise but got ' + callback);
+            }
+
+            var args = arguments,
+                promise = callback.apply(bindContext, args);
+            return me.promise.call(me, promise);
+        }, bindContext);
     },
 
     /**
@@ -32277,7 +40658,41 @@ module.exports = {
         _.nextTick(function() {
             me.trigger.apply(me, args);
         });
-    }
+    },
+
+    /**
+     * Returns a Promise for the triggered action
+     */
+    triggerPromise: function(){
+        var me = this;
+        var args = arguments;
+
+        var canHandlePromise =
+            this.children.indexOf('completed') >= 0 &&
+            this.children.indexOf('failed') >= 0;
+
+        if (!canHandlePromise){
+            throw new Error('Publisher must have "completed" and "failed" child publishers');
+        }
+
+        var promise = _.createPromise(function(resolve, reject) {
+            var removeSuccess = me.completed.listen(function(args) {
+                removeSuccess();
+                removeFailed();
+                resolve(args);
+            });
+
+            var removeFailed = me.failed.listen(function(args) {
+                removeSuccess();
+                removeFailed();
+                reject(args);
+            });
+
+            me.triggerAsync.apply(me, args);
+        });
+
+        return promise;
+    },
 };
 
 },{"./utils":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\utils.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\StoreMethods.js":[function(require,module,exports){
@@ -32304,7 +40719,7 @@ module.exports = function(store, definition) {
 };
 
 },{}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\connect.js":[function(require,module,exports){
-var Reflux = require('../src'),
+var Reflux = require('./index'),
     _ = require('./utils');
 
 module.exports = function(listenable,key){
@@ -32327,9 +40742,50 @@ module.exports = function(listenable,key){
     };
 };
 
-},{"../src":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js","./utils":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\utils.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\createAction.js":[function(require,module,exports){
+},{"./index":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js","./utils":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\utils.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\connectFilter.js":[function(require,module,exports){
+var Reflux = require('./index'),
+  _ = require('./utils');
+
+module.exports = function(listenable, key, filterFunc) {
+    filterFunc = _.isFunction(key) ? key : filterFunc;
+    return {
+        getInitialState: function() {
+            if (!_.isFunction(listenable.getInitialState)) {
+                return {};
+            } else if (_.isFunction(key)) {
+                return filterFunc.call(this, listenable.getInitialState());
+            } else {
+                // Filter initial payload from store.
+                var result = filterFunc.call(this, listenable.getInitialState());
+                if (result) {
+                  return _.object([key], [result]);
+                } else {
+                  return {};
+                }
+            }
+        },
+        componentDidMount: function() {
+            _.extend(this, Reflux.ListenerMethods);
+            var me = this;
+            var cb = function(value) {
+                if (_.isFunction(key)) {
+                    me.setState(filterFunc.call(me, value));
+                } else {
+                    var result = filterFunc.call(me, value);
+                    me.setState(_.object([key], [result]));
+                }
+            };
+
+            this.listenTo(listenable, cb);
+        },
+        componentWillUnmount: Reflux.ListenerMixin.componentWillUnmount
+    };
+};
+
+
+},{"./index":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js","./utils":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\utils.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\createAction.js":[function(require,module,exports){
 var _ = require('./utils'),
-    Reflux = require('../src'),
+    Reflux = require('./index'),
     Keep = require('./Keep'),
     allowed = {preEmit:1,shouldEmit:1};
 
@@ -32340,9 +40796,12 @@ var _ = require('./utils'),
  *
  * @param {Object} definition The action object definition
  */
-module.exports = function(definition) {
+var createAction = function(definition) {
 
     definition = definition || {};
+    if (!_.isObject(definition)){
+        definition = {actionName: definition};
+    }
 
     for(var a in Reflux.ActionMethods){
         if (!allowed[a] && Reflux.PublisherMethods[a]) {
@@ -32360,6 +40819,17 @@ module.exports = function(definition) {
         }
     }
 
+    definition.children = definition.children || [];
+    if (definition.asyncResult){
+        definition.children = definition.children.concat(["completed","failed"]);
+    }
+
+    var i = 0, childActions = {};
+    for (; i < definition.children.length; i++) {
+        var name = definition.children[i];
+        childActions[name] = createAction(name);
+    }
+
     var context = _.extend({
         eventLabel: "action",
         emitter: new _.EventEmitter(),
@@ -32370,7 +40840,7 @@ module.exports = function(definition) {
         functor[functor.sync?"trigger":"triggerAsync"].apply(functor, arguments);
     };
 
-    _.extend(functor,context);
+    _.extend(functor,childActions,context);
 
     Keep.createdActions.push(functor);
 
@@ -32378,10 +40848,13 @@ module.exports = function(definition) {
 
 };
 
-},{"../src":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js","./Keep":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\Keep.js","./utils":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\utils.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\createStore.js":[function(require,module,exports){
+module.exports = createAction;
+
+},{"./Keep":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\Keep.js","./index":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js","./utils":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\utils.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\createStore.js":[function(require,module,exports){
 var _ = require('./utils'),
-    Reflux = require('../src'),
+    Reflux = require('./index'),
     Keep = require('./Keep'),
+    mixer = require('./mixer'),
     allowed = {preEmit:1,shouldEmit:1},
     bindMethods = require('./bindMethods');
 
@@ -32399,7 +40872,7 @@ module.exports = function(definition) {
 
     for(var a in Reflux.StoreMethods){
         if (!allowed[a] && (Reflux.PublisherMethods[a] || Reflux.ListenerMethods[a])){
-            throw new Error("Cannot override API method " + a + 
+            throw new Error("Cannot override API method " + a +
                 " in Reflux.StoreMethods. Use another method name or override it on Reflux.PublisherMethods / Reflux.ListenerMethods instead."
             );
         }
@@ -32407,17 +40880,20 @@ module.exports = function(definition) {
 
     for(var d in definition){
         if (!allowed[d] && (Reflux.PublisherMethods[d] || Reflux.ListenerMethods[d])){
-            throw new Error("Cannot override API method " + d + 
+            throw new Error("Cannot override API method " + d +
                 " in store creation. Use another method name or override it on Reflux.PublisherMethods / Reflux.ListenerMethods instead."
             );
         }
     }
+
+    definition = mixer(definition);
 
     function Store() {
         var i=0, arr;
         this.subscriptions = [];
         this.emitter = new _.EventEmitter();
         this.eventLabel = "change";
+        bindMethods(this, definition);
         if (this.init && _.isFunction(this.init)) {
             this.init();
         }
@@ -32432,13 +40908,12 @@ module.exports = function(definition) {
     _.extend(Store.prototype, Reflux.ListenerMethods, Reflux.PublisherMethods, Reflux.StoreMethods, definition);
 
     var store = new Store();
-    bindMethods(store, definition);
     Keep.createdStores.push(store);
 
     return store;
 };
 
-},{"../src":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js","./Keep":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\Keep.js","./bindMethods":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\bindMethods.js","./utils":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\utils.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js":[function(require,module,exports){
+},{"./Keep":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\Keep.js","./bindMethods":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\bindMethods.js","./index":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js","./mixer":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\mixer.js","./utils":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\utils.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js":[function(require,module,exports){
 exports.ActionMethods = require('./ActionMethods');
 
 exports.ListenerMethods = require('./ListenerMethods');
@@ -32452,6 +40927,8 @@ exports.createAction = require('./createAction');
 exports.createStore = require('./createStore');
 
 exports.connect = require('./connect');
+
+exports.connectFilter = require('./connectFilter');
 
 exports.ListenerMixin = require('./ListenerMixin');
 
@@ -32470,17 +40947,21 @@ exports.joinStrict = maker("strict");
 
 exports.joinConcat = maker("all");
 
+var _ = require('./utils');
 
 /**
  * Convenience function for creating a set of actions
  *
- * @param actionNames the names for the actions to be created
+ * @param definitions the definitions for the actions to be created
  * @returns an object with actions of corresponding action names
  */
-exports.createActions = function(actionNames) {
-    var i = 0, actions = {};
-    for (; i < actionNames.length; i++) {
-        actions[actionNames[i]] = exports.createAction();
+exports.createActions = function(definitions) {
+    var actions = {};
+    for (var k in definitions){
+        var val = definitions[k],
+            actionName = _.isObject(val) ? k : val;
+
+        actions[actionName] = exports.createAction(val);
     }
     return actions;
 };
@@ -32492,6 +40973,25 @@ exports.setEventEmitter = function(ctx) {
     var _ = require('./utils');
     _.EventEmitter = ctx;
 };
+
+
+/**
+ * Sets the Promise library that Reflux uses
+ */
+exports.setPromise = function(ctx) {
+    var _ = require('./utils');
+    _.Promise = ctx;
+};
+
+/**
+ * Sets the Promise factory that creates new promises
+ * @param {Function} factory has the signature `function(resolver) { return [new Promise]; }`
+ */
+exports.setPromiseFactory = function(factory) {
+    var _ = require('./utils');
+    _.createPromise = factory;
+};
+
 
 /**
  * Sets the method used for deferring actions and stores
@@ -32517,7 +41017,7 @@ if (!Function.prototype.bind) {
   );
 }
 
-},{"./ActionMethods":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\ActionMethods.js","./Keep":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\Keep.js","./ListenerMethods":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\ListenerMethods.js","./ListenerMixin":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\ListenerMixin.js","./PublisherMethods":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\PublisherMethods.js","./StoreMethods":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\StoreMethods.js","./connect":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\connect.js","./createAction":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\createAction.js","./createStore":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\createStore.js","./joins":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\joins.js","./listenTo":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\listenTo.js","./listenToMany":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\listenToMany.js","./utils":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\utils.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\joins.js":[function(require,module,exports){
+},{"./ActionMethods":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\ActionMethods.js","./Keep":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\Keep.js","./ListenerMethods":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\ListenerMethods.js","./ListenerMixin":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\ListenerMixin.js","./PublisherMethods":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\PublisherMethods.js","./StoreMethods":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\StoreMethods.js","./connect":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\connect.js","./connectFilter":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\connectFilter.js","./createAction":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\createAction.js","./createStore":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\createStore.js","./joins":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\joins.js","./listenTo":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\listenTo.js","./listenToMany":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\listenToMany.js","./utils":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\utils.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\joins.js":[function(require,module,exports){
 /**
  * Internal module used to create static and instance join methods
  */
@@ -32583,7 +41083,7 @@ exports.instanceJoinCreator = function(strategy){
 
 function makeStopper(subobj,cancels,context){
     return function() {
-        var i, subs = context.subscriptions;
+        var i, subs = context.subscriptions,
             index = (subs ? subs.indexOf(subobj) : -1);
         _.throwIf(index === -1,'Tried to remove join already gone from subscriptions list!');
         for(i=0;i < cancels.length; i++){
@@ -32626,7 +41126,7 @@ function emitIfAllListenablesEmitted(join) {
 }
 
 },{"./createStore":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\createStore.js","./utils":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\utils.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\listenTo.js":[function(require,module,exports){
-var Reflux = require('../src');
+var Reflux = require('./index');
 
 
 /**
@@ -32663,8 +41163,8 @@ module.exports = function(listenable,callback,initial){
     };
 };
 
-},{"../src":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\listenToMany.js":[function(require,module,exports){
-var Reflux = require('../src');
+},{"./index":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\listenToMany.js":[function(require,module,exports){
+var Reflux = require('./index');
 
 /**
  * A mixin factory for a React component. Meant as a more convenient way of using the `listenerMixin`,
@@ -32698,7 +41198,66 @@ module.exports = function(listenables){
     };
 };
 
-},{"../src":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\utils.js":[function(require,module,exports){
+},{"./index":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\mixer.js":[function(require,module,exports){
+var _ = require('./utils');
+
+module.exports = function mix(def) {
+    var composed = {
+        init: [],
+        preEmit: [],
+        shouldEmit: []
+    };
+
+    var updated = (function mixDef(mixin) {
+        var mixed = {};
+        if (mixin.mixins) {
+            mixin.mixins.forEach(function (subMixin) {
+                _.extend(mixed, mixDef(subMixin));
+            });
+        }
+        _.extend(mixed, mixin);
+        Object.keys(composed).forEach(function (composable) {
+            if (mixin.hasOwnProperty(composable)) {
+                composed[composable].push(mixin[composable]);
+            }
+        });
+        return mixed;
+    }(def));
+
+    if (composed.init.length > 1) {
+        updated.init = function () {
+            var args = arguments;
+            composed.init.forEach(function (init) {
+                init.apply(this, args);
+            }, this);
+        };
+    }
+    if (composed.preEmit.length > 1) {
+        updated.preEmit = function () {
+            return composed.preEmit.reduce(function (args, preEmit) {
+                var newValue = preEmit.apply(this, args);
+                return newValue === undefined ? args : [newValue];
+            }.bind(this), arguments);
+        };
+    }
+    if (composed.shouldEmit.length > 1) {
+        updated.shouldEmit = function () {
+            var args = arguments;
+            return !composed.shouldEmit.some(function (shouldEmit) {
+                return !shouldEmit.apply(this, args);
+            }, this);
+        };
+    }
+    Object.keys(composed).forEach(function (composable) {
+        if (composed[composable].length === 1) {
+            updated[composable] = composed[composable][0];
+        }
+    });
+
+    return updated;
+};
+
+},{"./utils":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\utils.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\src\\utils.js":[function(require,module,exports){
 /*
  * isObject, extend, isFunction, isArguments are taken from undescore/lodash in
  * order to remove the dependency
@@ -32732,8 +41291,12 @@ exports.nextTick = function(callback) {
     setTimeout(callback, 0);
 };
 
+exports.capitalize = function(string){
+    return string.charAt(0).toUpperCase()+string.slice(1);
+};
+
 exports.callbackName = function(string){
-    return "on"+string.charAt(0).toUpperCase()+string.slice(1);
+    return "on"+exports.capitalize(string);
 };
 
 exports.object = function(keys,vals){
@@ -32744,9 +41307,14 @@ exports.object = function(keys,vals){
     return o;
 };
 
+exports.Promise = require("native-promise-only");
+
+exports.createPromise = function(resolver) {
+    return new exports.Promise(resolver);
+};
+
 exports.isArguments = function(value) {
-    return value && typeof value == 'object' && typeof value.length == 'number' &&
-      (toString.call(value) === '[object Arguments]' || (hasOwnProperty.call(value, 'callee' && !propertyIsEnumerable.call(value, 'callee')))) || false;
+    return typeof value === 'object' && ('callee' in value) && typeof value.length === 'number';
 };
 
 exports.throwIf = function(val,msg){
@@ -32755,7 +41323,7 @@ exports.throwIf = function(val,msg){
     }
 };
 
-},{"eventemitter3":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\node_modules\\eventemitter3\\index.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\store\\store.js":[function(require,module,exports){
+},{"eventemitter3":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\node_modules\\eventemitter3\\index.js","native-promise-only":"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\reflux\\node_modules\\native-promise-only\\npo.js"}],"D:\\Dropbox\\Coding\\www\\heroforge\\node_modules\\store\\store.js":[function(require,module,exports){
 ;(function(win){
 	var store = {},
 		doc = win.document,

@@ -1,0 +1,22 @@
+
+
+#dialog-container .dialog {
+  .mui-dialog-window-contents {
+    background: fade(@paper-color, 95%) url("./images/paper-over.png") repeat;
+    .mui-paper-container:before {
+      position: absolute;
+      content: "";
+      top: 0px;
+      left: 0px;
+      width: 100%;
+      height: 100%;
+      box-shadow: inset 0 0 60px 0 rgba(108, 78, 9, 0.30);
+    }
+  }
+  
+  h3 {
+    font-family: @decorativeFontFamily;
+    font-weight: bold;
+    text-align: center;
+  }
+}

@@ -20,7 +20,7 @@ var CharacterPlayer = React.createClass({
   render: function() {
     var character = this.props.character;
     return (
-      <HFRouteWrapper className="hf-mode page" user={this.props.user} title={character.name} subtitle="Play Mode">
+      <HFRouteWrapper showBack={true} className="hf-mode page" user={this.props.user} title={character.name} subtitle="Play Mode">
         <HFPage>
           {(character) ?
               <h4><strong>Playing a character called {character.name}</strong></h4>
